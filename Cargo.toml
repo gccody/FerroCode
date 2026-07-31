@@ -1,0 +1,24 @@
+[package]
+name = "codeagent"
+version = "0.1.0"
+edition = "2024"
+description = "A native Rust control surface for Codex"
+license = "MIT"
+
+[dependencies]
+crossbeam-channel = "0.5"
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+egui_commonmark = { version = "0.22", features = ["better_syntax_highlighting", "embedded_image", "fetch", "svg"] }
+image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+rfd = { version = "0.15", default-features = false }
+ron = { version = "0.11", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Time"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
