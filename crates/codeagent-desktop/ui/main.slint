@@ -1,0 +1,941 @@
+import { ComboBox, LineEdit, ListView, ScrollView, Spinner } from "std-widgets.slint";
+
+export struct ProjectRow { id: string, name: string, path: string, active: bool }
+export struct ThreadRow { id: string, project-id: string, title: string, subtitle: string, active: bool, busy: bool }
+export struct MarkdownTableCell { text: styled-text, alignment: string, column-width: length }
+export struct MarkdownTableRow { cells: [MarkdownTableCell], header: bool, row-height: length }
+export struct MarkdownBlock {
+    kind: string, text: styled-text, raw-text: string, level: int,
+    block-height: length, column-count: int, table-width: length, table-height: length,
+    table-rows: [MarkdownTableRow]
+}
+export struct MessageRow {
+    id: string, kind: string, title: string, body: string, markdown-blocks: [MarkdownBlock], status: string,
+    user: bool, activity: bool, row-height: length
+}
+export struct FileRow {
+    name: string, depth: int, directory: bool, changed: bool, connector-height: int,
+    guide0: bool, guide1: bool, guide2: bool, guide3: bool, guide4: bool, guide5: bool
+}
+export struct QuestionRow {
+    index: int, header: string, question: string, answer: string, secret: bool,
+    option-count: int, option-a: string, option-b: string, option-c: string
+}
+
+component BrandMark inherits Rectangle {
+    width: 18px; height: 18px;
+    border-radius: 9px;
+    border-width: 2px;
+    border-color: #7658db;
+    Rectangle { width: 5px; height: 5px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 3px; background: #a893ff; }
+}
+
+component PlusMark inherits Path {
+    width: 14px; height: 14px;
+    commands: "M 7 1 L 7 13 M 1 7 L 13 7";
+    viewbox-width: 14; viewbox-height: 14;
+    fill: transparent; stroke: #aeb0b8; stroke-width: 1.8px;
+    stroke-line-cap: round;
+}
+
+component MenuMark inherits Path {
+    width: 15px; height: 13px;
+    commands: "M 1 2 L 14 2 M 1 6.5 L 14 6.5 M 1 11 L 14 11";
+    viewbox-width: 15; viewbox-height: 13;
+    fill: transparent; stroke: #aeb0b8; stroke-width: 1.8px;
+    stroke-line-cap: round;
+}
+
+component SmallButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-enabled: enabled;
+    height: 30px;
+    min-width: 52px;
+    border-radius: 7px;
+    background: !enabled ? #202126 : primary ? #634bb9 : selected ? #33343a : touch.has-hover ? #35363c : #26272c;
+    border-width: primary ? 0px : 1px;
+    border-color: danger ? #d75c68 : #35373d;
+    Text {
+        x: 9px; width: parent.width - 18px;
+        text: root.text;
+        color: !root.enabled ? #666871 : danger ? #f17b86 : #c8c9ce;
+        font-size: 12px;
+        horizontal-alignment: TextHorizontalAlignment.center;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: root.enabled ? pointer : default; clicked => { root.clicked(); } }
+}
+
+component ToggleSwitch inherits Rectangle {
+    in property <bool> checked: false;
+    in property <string> label;
+    callback toggled(bool);
+    width: 38px;
+    height: 20px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: checked ? #8068cf : #45474f;
+    background: checked ? #59469b : #292a30;
+    accessible-role: button;
+    accessible-label: label;
+    Rectangle {
+        x: root.checked ? 19px : 3px;
+        y: 3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: root.checked ? #f0ecff : #a6a8b0;
+    }
+    toggle-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggled(!root.checked); }
+    }
+}
+
+component FlatButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> plus-icon: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-enabled: enabled;
+    height: 36px;
+    border-radius: 6px;
+    background: touch.has-hover && enabled ? #1d1e22 : transparent;
+    if root.plus-icon: PlusMark { x: 10px; y: (parent.height - self.height) / 2; }
+    Text { x: root.plus-icon ? 34px : 9px; width: parent.width - self.x - 8px; text: root.text; color: root.enabled ? #d7d8dc : #73757d; font-size: 13px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: root.enabled ? pointer : default; clicked => { root.clicked(); } }
+}
+
+component ComposerEdit inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <bool> enabled: true;
+    callback key-pressed(KeyEvent) -> EventResult;
+    accessible-role: text-input;
+    accessible-enabled: enabled;
+    accessible-value: text;
+    accessible-placeholder-text: placeholder-text;
+    clip: true;
+
+    Text {
+        x: 1px; y: 1px; width: parent.width - 2px; height: 20px;
+        text: root.text == "" ? root.placeholder-text : "";
+        color: #a3a5ad;
+        font-size: 12px;
+        overflow: elide;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+    input := TextInput {
+        width: parent.width; height: parent.height;
+        enabled: root.enabled;
+        color: #e2e2e5;
+        font-size: 12px;
+        wrap: word-wrap;
+        single-line: false;
+        key-pressed(event) => { root.key-pressed(event) }
+    }
+}
+
+component MessageCard inherits Rectangle {
+    in property <MessageRow> message;
+    horizontal-stretch: 1;
+    height: message.row-height;
+    background: transparent;
+
+    if message.user: Rectangle {
+        // Use the renderer's proportional-font measurement so every bubble
+        // has exactly 14 px of horizontal padding, including short messages.
+        width: min(bubble-text.preferred-width + 28px, min(650px, parent.width - 18px));
+        height: parent.height - 10px;
+        x: parent.width - self.width - 8px;
+        y: 5px;
+        border-radius: 14px;
+        background: #222226;
+        border-width: 1px;
+        border-color: #303137;
+        bubble-text := Text {
+            x: 14px; y: 8px; width: parent.width - 28px; height: parent.height - 16px;
+            text: message.body;
+            color: #e8e8eb;
+            font-size: 13px;
+            wrap: word-wrap;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+    }
+
+    if message.activity: Rectangle {
+        x: 8px; width: parent.width - 16px; height: parent.height;
+        Path {
+            x: 4px; y: (parent.height - 12px) / 2; width: 11px; height: 12px;
+            commands: message.status == "running" ? "M 1 2 L 4.5 6 L 8 2" : "M 2 1 L 6 5 L 2 9";
+            viewbox-width: 10; viewbox-height: 10; fill: transparent; stroke: #9a9ca4; stroke-width: 1.7px;
+            stroke-line-cap: round; stroke-line-join: round;
+        }
+        Text { x: 26px; width: parent.width - 74px; text: message.title; color: #989aa2; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+        if message.status == "running": Spinner { x: parent.width - 25px; y: (parent.height - 14px) / 2; width: 14px; height: 14px; }
+    }
+
+    if !message.user && !message.activity: VerticalLayout {
+        padding-left: 8px; padding-right: 8px; padding-top: 5px; padding-bottom: 5px;
+        spacing: 7px;
+
+        for block in message.markdown-blocks: Rectangle {
+            height: block.block-height;
+            background: transparent;
+
+            if block.kind == "paragraph": StyledText {
+                width: parent.width; height: parent.height;
+                text: block.text;
+                default-color: message.kind == "reasoning" ? #aaabb2 : #f0f0f2;
+                default-font-size: message.kind == "reasoning" ? 12px : 13px;
+                link-color: message.kind == "reasoning" ? #a99ce0 : #a893ff;
+                vertical-alignment: TextVerticalAlignment.top;
+                link-clicked(link) => { Platform.open-url(link); }
+            }
+
+            if block.kind == "heading": StyledText {
+                width: parent.width; height: parent.height;
+                text: block.text;
+                default-color: #f4f2fa;
+                default-font-size: block.level == 1 ? 22px : block.level == 2 ? 19px : block.level == 3 ? 17px : block.level == 4 ? 15px : 14px;
+                link-color: #b8a8ff;
+                vertical-alignment: TextVerticalAlignment.center;
+                link-clicked(link) => { Platform.open-url(link); }
+            }
+
+            if block.kind == "quote": Rectangle {
+                width: parent.width; height: parent.height;
+                background: #14151a;
+                border-radius: 4px;
+                Rectangle { x: 0px; width: 3px; height: parent.height; border-radius: 2px; background: #6f5bb4; }
+                StyledText {
+                    x: 13px; y: 7px; width: parent.width - 22px; height: parent.height - 14px;
+                    text: block.text;
+                    default-color: #bbb9c3;
+                    default-font-size: message.kind == "reasoning" ? 12px : 13px;
+                    link-color: #a893ff;
+                    vertical-alignment: TextVerticalAlignment.top;
+                    link-clicked(link) => { Platform.open-url(link); }
+                }
+            }
+
+            if block.kind == "code": Rectangle {
+                width: parent.width; height: parent.height;
+                background: #17181d;
+                border-width: 1px; border-color: #303138; border-radius: 6px;
+                Text {
+                    x: 10px; y: 7px; width: parent.width - 20px; height: parent.height - 14px;
+                    text: block.raw-text;
+                    color: #d7d5de;
+                    font-family: "Cascadia Mono";
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    vertical-alignment: TextVerticalAlignment.top;
+                }
+            }
+
+            if block.kind == "rule": Rectangle {
+                y: (parent.height - 1px) / 2; width: parent.width; height: 1px; background: #34353b;
+            }
+
+            if block.kind == "table": ScrollView {
+                width: parent.width; height: parent.height;
+                viewport-width: block.table-width;
+                viewport-height: block.table-height;
+                horizontal-scrollbar-policy: as-needed;
+                vertical-scrollbar-policy: always-off;
+                Rectangle {
+                    width: block.table-width; height: block.table-height;
+                    border-width: 1px; border-color: #393a42; border-radius: 10px;
+                    clip: true;
+                    VerticalLayout {
+                        spacing: 0px;
+                        for row[row-index] in block.table-rows: HorizontalLayout {
+                            height: row.row-height;
+                            spacing: 0px;
+                            for cell[cell-index] in row.cells: Rectangle {
+                                width: cell.column-width;
+                                horizontal-stretch: 0;
+                                border-width: 1px;
+                                border-color: #393a42;
+                                border-top-left-radius: row-index == 0 && cell-index == 0 ? 10px : 0px;
+                                border-top-right-radius: row-index == 0 && cell-index == row.cells.length - 1 ? 10px : 0px;
+                                border-bottom-left-radius: row-index == block.table-rows.length - 1 && cell-index == 0 ? 10px : 0px;
+                                border-bottom-right-radius: row-index == block.table-rows.length - 1 && cell-index == row.cells.length - 1 ? 10px : 0px;
+                                background: row.header ? #24212f : #15161a;
+                                StyledText {
+                                    x: 8px; y: 6px; width: parent.width - 16px; height: parent.height - 12px;
+                                    text: cell.text;
+                                    default-color: row.header ? #f0ecff : #d2d2d7;
+                                    default-font-size: 12px;
+                                    link-color: #a893ff;
+                                    horizontal-alignment: cell.alignment == "center" ? TextHorizontalAlignment.center : cell.alignment == "right" ? TextHorizontalAlignment.right : TextHorizontalAlignment.left;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                    link-clicked(link) => { Platform.open-url(link); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component SectionTitle inherits Text {
+    color: #9799a1;
+    font-size: 12px;
+}
+
+component ChevronDown inherits Path {
+    width: 12px; height: 8px;
+    commands: "M 1 1 L 6 6.5 L 11 1";
+    viewbox-width: 12; viewbox-height: 8;
+    fill: transparent; stroke: #a7a9b0; stroke-width: 1.7px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+component CloseMark inherits Path {
+    width: 12px; height: 12px;
+    commands: "M 1.5 1.5 L 10.5 10.5 M 10.5 1.5 L 1.5 10.5";
+    viewbox-width: 12; viewbox-height: 12;
+    fill: transparent; stroke: #b7b8bd; stroke-width: 1.7px; stroke-line-cap: round;
+}
+
+component ExternalMark inherits Path {
+    width: 14px; height: 14px;
+    commands: "M 6 2.5 L 2.5 2.5 L 2.5 11.5 L 11.5 11.5 L 11.5 8 M 7 7 L 12.5 1.5 M 8.5 1.5 L 12.5 1.5 L 12.5 5.5";
+    viewbox-width: 14; viewbox-height: 14;
+    fill: transparent; stroke: #92949c; stroke-width: 1.65px; stroke-line-cap: round; stroke-line-join: round;
+}
+
+component SettingsCog inherits Path {
+    width: 16px; height: 16px;
+    commands: "M 6.1 1 L 9.9 1 L 10.3 2.8 C 10.8 3 11.2 3.2 11.6 3.5 L 13.3 3 L 15 6 L 13.7 7.2 C 13.8 7.7 13.8 8.3 13.7 8.8 L 15 10 L 13.3 13 L 11.6 12.5 C 11.2 12.8 10.8 13 10.3 13.2 L 9.9 15 L 6.1 15 L 5.7 13.2 C 5.2 13 4.8 12.8 4.4 12.5 L 2.7 13 L 1 10 L 2.3 8.8 C 2.2 8.3 2.2 7.7 2.3 7.2 L 1 6 L 2.7 3 L 4.4 3.5 C 4.8 3.2 5.2 3 5.7 2.8 Z M 10.2 8 A 2.2 2.2 0 1 1 5.8 8 A 2.2 2.2 0 1 1 10.2 8";
+    viewbox-width: 16; viewbox-height: 16;
+    fill: transparent; stroke: #a2a4ac; stroke-width: 1.6px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+component PaperclipMark inherits Path {
+    width: 17px; height: 17px;
+    commands: "M 21.44 11.05 L 12.25 20.24 C 9.91 22.58 6.11 22.58 3.76 20.24 C 1.42 17.90 1.42 14.10 3.76 11.76 L 12.95 2.57 C 14.51 1.01 17.05 1.01 18.61 2.57 C 20.17 4.13 20.17 6.67 18.61 8.23 L 9.41 17.42 C 8.63 18.20 7.37 18.20 6.59 17.42 C 5.81 16.64 5.81 15.38 6.59 14.59 L 15.07 6.11";
+    viewbox-width: 24; viewbox-height: 24;
+    fill: transparent; stroke: #c3c5cc; stroke-width: 1.2px; stroke-line-cap: round; stroke-line-join: round;
+}
+
+component SendMark inherits Path {
+    width: 14px; height: 15px;
+    commands: "M 6 11 L 6 2 M 2 6 L 6 2 L 10 6";
+    viewbox-width: 12; viewbox-height: 13;
+    fill: transparent; stroke: #e3def8; stroke-width: 1.8px; stroke-line-cap: round; stroke-line-join: round;
+}
+
+component InspectorMark inherits Path {
+    width: 16px; height: 14px;
+    commands: "M 1 1 L 13 1 L 13 11 L 1 11 Z M 9 1 L 9 11";
+    viewbox-width: 14; viewbox-height: 12;
+    fill: transparent; stroke: #aaa4c4; stroke-width: 1.65px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+component FileTreeNode inherits Rectangle {
+    in property <FileRow> node;
+    in property <length> tree-origin: 13px;
+    height: 26px;
+    background: transparent;
+
+    property <length> branch-x: node.depth * 16px + tree-origin;
+
+    // Keep each open ancestor branch running behind nested descendants.
+    if node.guide0: Rectangle { x: root.tree-origin; width: 1px; height: parent.height; background: #50525a; }
+    if node.guide1: Rectangle { x: root.tree-origin + 16px; width: 1px; height: parent.height; background: #50525a; }
+    if node.guide2: Rectangle { x: root.tree-origin + 32px; width: 1px; height: parent.height; background: #50525a; }
+    if node.guide3: Rectangle { x: root.tree-origin + 48px; width: 1px; height: parent.height; background: #50525a; }
+    if node.guide4: Rectangle { x: root.tree-origin + 64px; width: 1px; height: parent.height; background: #50525a; }
+    if node.guide5: Rectangle { x: root.tree-origin + 80px; width: 1px; height: parent.height; background: #50525a; }
+
+    // Rust resolves the sibling relationship. The renderer only draws the
+    // resulting connector, avoiding conditionals inside virtualized rows.
+    Rectangle {
+        x: root.branch-x;
+        // Slint centers a shortened child vertically when y is implicit,
+        // putting the stroke through both sides of the horizontal junction.
+        y: 0px;
+        width: 1px;
+        height: root.node.connector-height * 1px;
+        background: #50525a;
+    }
+    Rectangle { x: root.branch-x; y: 12px; width: 12px; height: 1px; background: #50525a; }
+
+    Text {
+        x: root.branch-x + 14px;
+        width: parent.width - self.x;
+        text: root.node.name;
+        color: root.node.changed ? #ff8f9c : root.node.directory ? #dcdee4 : #aeb0b8;
+        font-size: 10px;
+        overflow: elide;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+}
+
+component InspectorTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    callback clicked;
+    accessible-role: button;
+    accessible-label: text;
+    height: 30px;
+    horizontal-stretch: 1;
+    border-radius: 5px;
+    background: selected ? #2c2740 : tab-touch.has-hover ? #24252a : transparent;
+    Text {
+        text: root.text;
+        color: root.selected ? #ddd5ff : #9799a1;
+        font-size: 9px;
+        horizontal-alignment: TextHorizontalAlignment.center;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+    Rectangle {
+        visible: root.selected;
+        x: 7px; y: parent.height - 2px;
+        width: parent.width - 14px; height: 2px;
+        border-radius: 1px;
+        background: #8068cf;
+    }
+    tab-touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+export component MainWindow inherits Window {
+    title: "CodeAgent";
+    preferred-width: 1440px; preferred-height: 900px;
+    min-width: 980px; min-height: 640px;
+    background: #0d0e10;
+    default-font-family: "Segoe UI";
+
+    in property <[ProjectRow]> projects;
+    in property <[ThreadRow]> threads;
+    in property <[MessageRow]> messages;
+    in property <[FileRow]> files;
+    in property <[string]> activity;
+    in property <[string]> model-names;
+    in property <[string]> effort-names;
+    in property <[string]> sandbox-names;
+    in property <[string]> approval-names;
+    in property <string> connection-text: "Starting Codex...";
+    in property <bool> connected: false;
+    in property <string> account-label: "";
+    in property <string> plan-label: "";
+    in property <string> workspace-path: "";
+    in property <string> workspace-name: "Workspace";
+    in property <string> active-thread-title: "New thread";
+    in property <string> context-label: "";
+    in property <string> usage-left-label: "";
+    in property <int> context-percent: 0;
+    in property <bool> busy: false;
+    in property <bool> has-project: false;
+    in-out property <int> attachment-count: 0;
+    in-out property <bool> inspector-visible: false;
+    in-out property <int> inspector-tab: 0;
+    in-out property <bool> settings-visible: false;
+    in-out property <bool> respect-gitignore: true;
+    in property <string> git-diff: "";
+    in-out property <int> selected-model-index: 0;
+    in-out property <int> selected-effort-index: 0;
+    in-out property <int> selected-sandbox-index: 1;
+    in-out property <int> default-model-index: 0;
+    in-out property <int> default-effort-index: 0;
+    in property <[string]> default-effort-names: [];
+    in-out property <int> default-sandbox-index: 1;
+    in-out property <int> selected-approval-index: 0;
+    in-out property <int> summary-model-index: 0;
+    in-out property <int> summary-effort-index: 0;
+    in property <[string]> summary-effort-names: [];
+    in property <string> usage-summary: "Usage information unavailable";
+    in property <int> reset-count: 0;
+    in property <bool> reset-in-progress: false;
+    in property <string> approval-title: "";
+    in property <string> approval-detail: "";
+    in property <bool> approval-session: false;
+    in property <[QuestionRow]> questions;
+    in property <string> toast-text: "";
+    in property <bool> toast-error: false;
+
+    callback add-project;
+    callback select-project(string);
+    callback new-thread;
+    callback open-thread(string);
+    callback archive-thread(string);
+    callback search-threads(string);
+    callback send-message(string);
+    callback stop-turn;
+    callback attach-files;
+    callback select-model(string);
+    callback select-effort(string);
+    callback select-sandbox(string);
+    callback select-default-model(string);
+    callback select-default-effort(string);
+    callback select-default-sandbox(string);
+    callback select-approval(string);
+    callback select-summary-model(string);
+    callback select-summary-effort(string);
+    callback answer-approval(string);
+    callback answer-question(int, string);
+    callback submit-question;
+    callback refresh-usage;
+    callback consume-reset;
+    callback set-inspector(bool);
+    callback set-respect-gitignore(bool);
+
+    changed inspector-visible => { root.set-inspector(root.inspector-visible); }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            height: 47px;
+            background: #0f1012;
+            border-width: 1px;
+            border-color: #292a2f;
+            HorizontalLayout {
+                padding-left: 11px; padding-right: 17px; spacing: 9px;
+                BrandMark { y: (parent.height - self.height) / 2; }
+                Text { text: "CodeAgent"; color: #f1f1f3; font-size: 14px; vertical-alignment: TextVerticalAlignment.center; }
+                Rectangle { horizontal-stretch: 1; }
+                if root.usage-left-label != "": Rectangle {
+                    width: usage-text.preferred-width + 18px; height: 19px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 10px; background: #38393e;
+                    usage-text := Text { text: root.usage-left-label; color: #f0f0f2; font-size: 11px; horizontal-alignment: TextHorizontalAlignment.center; vertical-alignment: TextVerticalAlignment.center; }
+                }
+                Rectangle { y: (parent.height - self.height) / 2; width: 8px; height: 8px; border-radius: 4px; background: root.connected ? #55d49a : #d6a54b; }
+                Text { text: root.connection-text; color: #a0a2aa; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 0px;
+
+            Rectangle {
+                width: 247px;
+                background: #0f1012;
+                border-width: 1px;
+                border-color: #292a2f;
+                VerticalLayout {
+                    padding-left: 4px; padding-right: 7px; padding-top: 9px; padding-bottom: 4px;
+                    spacing: 7px;
+
+                    FlatButton { text: "New chat"; plus-icon: true; enabled: root.has-project; clicked => { root.new-thread(); } }
+                    LineEdit { height: 28px; placeholder-text: "Search"; edited(text) => { root.search-threads(text); } }
+                    Rectangle { height: 14px; }
+                    HorizontalLayout {
+                        height: 22px;
+                        Text { text: "Projects"; color: #9799a1; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Rectangle {
+                            width: 19px;
+                            MenuMark { x: 2px; y: (parent.height - self.height) / 2; }
+                        }
+                        Rectangle {
+                            width: 24px;
+                            PlusMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                            add-project-touch := TouchArea { mouse-cursor: pointer; clicked => { root.add-project(); } }
+                        }
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        viewport-width: 230px;
+                        horizontal-scrollbar-policy: always-off;
+                        VerticalLayout {
+                            width: 230px;
+                            spacing: 2px;
+                            for project in root.projects: VerticalLayout {
+                                spacing: 1px;
+                                Rectangle {
+                                    height: 38px;
+                                    border-radius: 6px;
+                                    background: project-touch.has-hover ? #1b1c20 : transparent;
+                                    ChevronDown { x: 5px; y: 15px; }
+                                    Text { x: 77px; width: parent.width - 106px; text: project.name; color: #e8e8eb; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                                    ExternalMark { x: parent.width - 23px; y: 12px; }
+                                    project-touch := TouchArea { mouse-cursor: pointer; clicked => { root.select-project(project.id); } }
+                                }
+                                for thread in root.threads: Rectangle {
+                                    visible: thread.project-id == project.id;
+                                    height: 42px;
+                                    x: 17px;
+                                    width: 213px;
+                                    border-radius: 7px;
+                                    background: thread.active ? #202126 : thread-touch.has-hover ? #18191c : transparent;
+                                    Rectangle { x: -9px; width: 1px; height: parent.height; background: #303138; }
+                                    Text { x: 20px; width: parent.width - (thread.active ? 48px : 28px); text: thread.title; color: thread.active ? #f0f0f2 : #9a9ca4; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                                    if thread.busy: Spinner { x: parent.width - 22px; y: 14px; width: 13px; height: 13px; }
+                                    thread-touch := TouchArea { mouse-cursor: pointer; clicked => { root.open-thread(thread.id); } }
+                                    if thread.active && !thread.busy: Rectangle {
+                                        x: parent.width - 33px; y: 7px; width: 26px; height: 28px;
+                                        border-radius: 5px; background: close-touch.has-hover ? #34353a : transparent;
+                                        CloseMark { x: 7px; y: 8px; }
+                                        close-touch := TouchArea { mouse-cursor: pointer; clicked => { root.archive-thread(thread.id); } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: #292a2f; }
+                    Rectangle {
+                        height: 36px;
+                        border-radius: 6px;
+                        background: settings-touch.has-hover ? #1d1e22 : transparent;
+                        HorizontalLayout {
+                            alignment: LayoutAlignment.center;
+                            spacing: 10px;
+                            SettingsCog { y: (parent.height - self.height) / 2; }
+                            Text { text: "Settings"; color: #d7d8dc; font-size: 13px; vertical-alignment: TextVerticalAlignment.center; }
+                        }
+                        settings-touch := TouchArea { mouse-cursor: pointer; clicked => { root.settings-visible = true; } }
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                background: #0d0e10;
+                VerticalLayout {
+                    spacing: 0px;
+
+                    Rectangle {
+                        height: 57px;
+                        background: #0d0e10;
+                        border-width: 1px;
+                        border-color: #292a2f;
+                        HorizontalLayout {
+                            padding-left: 20px; padding-right: 17px; spacing: 8px;
+                            Text { text: root.active-thread-title; color: #f3f3f5; font-size: 15px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: root.workspace-path; color: #8d8f97; font-size: 10px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                            Rectangle {
+                                width: 32px; height: 30px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 7px;
+                                background: root.inspector-visible ? #2c2740 : inspector-touch.has-hover ? #24252a : #191a1e;
+                                border-width: 1px;
+                                border-color: root.inspector-visible ? #5b4b8d : #34363d;
+                                accessible-role: button;
+                                accessible-label: root.inspector-visible ? "Hide inspector" : "Show inspector";
+                                InspectorMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                inspector-touch := TouchArea { mouse-cursor: pointer; clicked => { root.inspector-visible = !root.inspector-visible; } }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        background: #0d0e10;
+                        if root.messages.length == 0: VerticalLayout {
+                            padding-left: 80px; padding-right: 80px;
+                            alignment: LayoutAlignment.center; spacing: 10px;
+                            HorizontalLayout {
+                                height: 34px;
+                                horizontal-stretch: 1;
+                                alignment: LayoutAlignment.center;
+                                BrandMark { width: 34px; height: 34px; border-radius: 17px; }
+                            }
+                            Text { text: "What should we build?"; color: #ededf0; font-size: 22px; horizontal-alignment: TextHorizontalAlignment.center; }
+                            Text { text: root.has-project ? "Ask CodeAgent to work in this project" : "Add a project folder to start"; color: #858790; font-size: 12px; horizontal-alignment: TextHorizontalAlignment.center; }
+                        }
+                        if root.messages.length > 0: Rectangle {
+                            conversation := ListView {
+                                x: max(16px, (parent.width - 850px) / 2);
+                                width: min(parent.width - 32px, 850px);
+                                height: parent.height;
+                                vertical-scrollbar-policy: as-needed;
+                                horizontal-scrollbar-policy: always-off;
+                                for message in root.messages: MessageCard { message: message; }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 132px;
+                        background: #0d0e10;
+                        border-width: 1px;
+                        border-color: #292a2f;
+                        composer-shell := Rectangle {
+                            width: min(parent.width - 38px, 820px);
+                            height: 116px;
+                            x: (parent.width - self.width) / 2;
+                            y: 8px;
+                            background: #17181d;
+                            border-width: 1px;
+                            border-color: #303138;
+                            border-radius: 14px;
+                            composer := ComposerEdit {
+                                x: 13px; y: 10px; width: parent.width - 26px; height: 59px;
+                                enabled: root.connected && root.has-project && !root.busy;
+                                placeholder-text: !root.has-project ? "Add a project folder before starting a thread" : root.connected ? "Ask for a follow-up or describe a task" : "Waiting for Codex CLI...";
+                                key-pressed(event) => {
+                                    if event.text == "\n" && event.modifiers.control {
+                                        if composer.text != "" { root.send-message(composer.text); composer.text = ""; }
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                            }
+                            HorizontalLayout {
+                                x: 12px; y: 75px; width: parent.width - 24px; height: 31px; spacing: 7px;
+                                Rectangle {
+                                    width: root.attachment-count > 0 ? 108px : 82px; height: 30px;
+                                    border-radius: 7px;
+                                    background: root.attachment-count > 0 ? #332b4d : attach-touch.has-hover ? #35363c : #26272c;
+                                    border-width: 1px; border-color: root.attachment-count > 0 ? #6955a8 : #35373d;
+                                    PaperclipMark { x: 9px; y: (parent.height - self.height) / 2; }
+                                    Text {
+                                        x: 32px; width: parent.width - 39px;
+                                        text: root.attachment-count > 0 ? "Attached " + root.attachment-count : "Attach";
+                                        color: root.attachment-count > 0 ? #d8ccff : #d0d1d6;
+                                        font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide;
+                                    }
+                                    attach-touch := TouchArea { enabled: root.has-project; mouse-cursor: root.has-project ? pointer : default; clicked => { root.attach-files(); } }
+                                }
+                                ComboBox { width: 136px; model: root.model-names; current-index <=> root.selected-model-index; selected(value) => { root.select-model(value); } }
+                                ComboBox { width: 99px; model: root.effort-names; current-index <=> root.selected-effort-index; selected(value) => { root.select-effort(value); } }
+                                ComboBox { width: 98px; model: root.sandbox-names; current-index <=> root.selected-sandbox-index; selected(value) => { root.select-sandbox(value); } }
+                                Rectangle { horizontal-stretch: 1; }
+                                if root.busy: SmallButton { width: 58px; text: "Stop"; danger: true; clicked => { root.stop-turn(); } }
+                                if !root.busy: Rectangle {
+                                    width: 20px; height: 20px; border-radius: 10px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-width: 2px; border-color: #30323a; background: transparent;
+                                }
+                                if !root.busy: Rectangle {
+                                    width: 31px; height: 31px; border-radius: 16px;
+                                    background: send-touch.has-hover ? #765dcc : #654db9;
+                                    SendMark { x: (parent.width - self.width) / 2 + 0.5px; y: (parent.height - self.height) / 2; }
+                                    send-touch := TouchArea { enabled: root.connected && root.has-project; mouse-cursor: pointer; clicked => { if composer.text != "" { root.send-message(composer.text); composer.text = ""; } } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.inspector-visible: Rectangle {
+                width: 288px;
+                background: #0f1012;
+                border-width: 1px; border-color: #292a2f;
+                VerticalLayout {
+                    padding: 12px; spacing: 9px;
+                    HorizontalLayout {
+                        SectionTitle { text: "INSPECTOR"; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Rectangle { width: 28px; height: 28px; border-radius: 5px; background: inspector-close.has-hover ? #34353a : transparent; CloseMark { x: 8px; y: 8px; } inspector-close := TouchArea { mouse-cursor: pointer; clicked => { root.inspector-visible = false; } } }
+                    }
+                    Rectangle { height: 1px; background: #292a2f; }
+                    HorizontalLayout {
+                        spacing: 3px;
+                        InspectorTab { text: "Workspace"; selected: root.inspector-tab == 0; clicked => { root.inspector-tab = 0; } }
+                        InspectorTab { text: "Changes"; selected: root.inspector-tab == 1; clicked => { root.inspector-tab = 1; } }
+                        InspectorTab { text: "Files"; selected: root.inspector-tab == 2; clicked => { root.inspector-tab = 2; } }
+                        InspectorTab { text: "Activity"; selected: root.inspector-tab == 3; clicked => { root.inspector-tab = 3; } }
+                    }
+                    if root.inspector-tab == 0: Rectangle {
+                        vertical-stretch: 1;
+                        Text { width: parent.width; text: root.workspace-path; color: #858790; font-size: 9px; wrap: word-wrap; }
+                    }
+                    if root.inspector-tab == 1: ScrollView {
+                        vertical-stretch: 1;
+                        Text { width: parent.width; text: root.git-diff == "" ? "Working tree clean" : root.git-diff; color: #a8a9af; font-family: "Cascadia Mono"; font-size: 9px; wrap: word-wrap; }
+                    }
+                    if root.inspector-tab == 2: Rectangle {
+                        vertical-stretch: 1;
+                        root-node-label := Text {
+                            x: 1px; y: 0px;
+                            width: parent.width - 2px;
+                            height: 22px;
+                            text: root.workspace-name;
+                            color: #eeeaff;
+                            font-size: 10px;
+                            font-weight: 600;
+                            overflow: elide;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                        if root.files.length > 0: Rectangle {
+                            x: 8px;
+                            y: 19px; width: 1px; height: 8px; background: #50525a;
+                        }
+                        ListView {
+                            x: 1px; y: 26px;
+                            width: parent.width - 2px;
+                            height: parent.height - 26px;
+                            for file in root.files: FileTreeNode {
+                                node: file;
+                                tree-origin: 7px;
+                            }
+                        }
+                    }
+                    if root.inspector-tab == 3: ListView {
+                        vertical-stretch: 1;
+                        for entry in root.activity: Text { height: 21px; text: entry; color: #7d7f87; font-size: 9px; overflow: elide; }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.settings-visible: Rectangle {
+        background: #99000000;
+        TouchArea { clicked => { root.settings-visible = false; } }
+        Rectangle {
+            width: 520px; height: min(parent.height - 30px, 690px);
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            background: #18191d; border-width: 1px; border-color: #363840; border-radius: 13px;
+            VerticalLayout {
+                padding: 20px; spacing: 13px;
+                HorizontalLayout {
+                    Text { text: "Settings"; color: #f0f0f2; font-size: 20px; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle { width: 34px; height: 30px; border-radius: 6px; background: settings-close.has-hover ? #34353a : #26272c; CloseMark { x: 11px; y: 9px; } settings-close := TouchArea { mouse-cursor: pointer; clicked => { root.settings-visible = false; } } }
+                }
+                settings-body-scroll := ScrollView {
+                    vertical-stretch: 1;
+                    viewport-width: self.width;
+                    horizontal-scrollbar-policy: always-off;
+                    VerticalLayout {
+                        width: settings-body-scroll.width;
+                        spacing: 13px;
+                        SectionTitle { text: "AGENT DEFAULTS"; color: #a995ff; }
+                        Text { text: "Model"; color: #c9cad0; font-size: 11px; }
+                        ComboBox { model: root.model-names; current-index <=> root.default-model-index; selected(value) => { root.select-default-model(value); } }
+                        Text { text: "Reasoning effort"; color: #c9cad0; font-size: 11px; }
+                        ComboBox { model: root.default-effort-names; current-index <=> root.default-effort-index; selected(value) => { root.select-default-effort(value); } }
+                        Text { text: "Workspace permissions"; color: #c9cad0; font-size: 11px; }
+                        ComboBox { model: root.sandbox-names; current-index <=> root.default-sandbox-index; selected(value) => { root.select-default-sandbox(value); } }
+                        Text { text: "Approval policy"; color: #c9cad0; font-size: 11px; }
+                        ComboBox { model: root.approval-names; current-index <=> root.selected-approval-index; selected(value) => { root.select-approval(value); } }
+                        Rectangle { height: 1px; background: #2b2d33; }
+                        SectionTitle { text: "FILES INSPECTOR"; color: #a995ff; }
+                        Rectangle {
+                            height: 43px;
+                            Text {
+                                x: 0px; y: 0px; height: 18px;
+                                text: "Respect .gitignore";
+                                color: #c9cad0;
+                                font-size: 11px;
+                                vertical-alignment: TextVerticalAlignment.center;
+                            }
+                            Text {
+                                x: 0px; y: 20px; width: parent.width - 55px; height: 18px;
+                                text: "Hide files matched by repository ignore rules.";
+                                color: #858790;
+                                font-size: 10px;
+                                overflow: elide;
+                                vertical-alignment: TextVerticalAlignment.center;
+                            }
+                            ToggleSwitch {
+                                x: parent.width - self.width;
+                                y: 4px;
+                                checked: root.respect-gitignore;
+                                label: "Respect .gitignore";
+                                toggled(value) => {
+                                    root.respect-gitignore = value;
+                                    root.set-respect-gitignore(value);
+                                }
+                            }
+                        }
+                        Rectangle { height: 1px; background: #2b2d33; }
+                        SectionTitle { text: "SUMMARIES"; color: #a995ff; }
+                        Text { text: "Summary model"; color: #c9cad0; font-size: 11px; }
+                        ComboBox { model: root.model-names; current-index <=> root.summary-model-index; selected(value) => { root.select-summary-model(value); } }
+                        Text { text: "Summary effort"; color: #c9cad0; font-size: 11px; }
+                        ComboBox { model: root.summary-effort-names; current-index <=> root.summary-effort-index; selected(value) => { root.select-summary-effort(value); } }
+                        Rectangle { height: 1px; background: #2b2d33; }
+                        SectionTitle { text: "CODEX ACCOUNT"; color: #a995ff; }
+                        Text { text: root.account-label == "" ? "Account information unavailable" : root.account-label + (root.plan-label != "" ? " - " + root.plan-label : ""); color: #c9cad0; font-size: 11px; }
+                        Text { text: root.usage-summary; color: #91939b; font-size: 10px; wrap: word-wrap; }
+                        HorizontalLayout {
+                            SmallButton { width: 110px; text: "Refresh usage"; clicked => { root.refresh-usage(); } }
+                            if root.reset-count > 0: SmallButton { width: 120px; text: root.reset-in-progress ? "Resetting..." : "Use reset (" + root.reset-count + ")"; primary: true; enabled: !root.reset-in-progress; clicked => { root.consume-reset(); } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.approval-title != "": Rectangle {
+        background: #aa000000;
+        Rectangle {
+            width: 560px; height: 350px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            background: #18191d; border-width: 1px; border-color: #4a3f73; border-radius: 13px;
+            VerticalLayout {
+                padding: 20px; spacing: 13px;
+                Text { text: root.approval-title; color: #f1f1f3; font-size: 19px; }
+                ScrollView { vertical-stretch: 1; Text { width: parent.width; text: root.approval-detail; color: #b9bbc2; font-family: "Cascadia Mono"; font-size: 11px; wrap: word-wrap; } }
+                HorizontalLayout {
+                    SmallButton { width: 76px; text: "Deny"; danger: true; clicked => { root.answer-approval("decline"); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.approval-session: SmallButton { width: 126px; text: "Allow session"; clicked => { root.answer-approval("acceptForSession"); } }
+                    SmallButton { width: 86px; text: "Allow once"; primary: true; clicked => { root.answer-approval("accept"); } }
+                }
+            }
+        }
+    }
+
+    if root.questions.length > 0: Rectangle {
+        background: #aa000000;
+        Rectangle {
+            width: 560px; height: 410px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            background: #18191d; border-width: 1px; border-color: #4a3f73; border-radius: 13px;
+            VerticalLayout {
+                padding: 20px; spacing: 12px;
+                Text { text: "Codex needs your input"; color: #f1f1f3; font-size: 19px; }
+                ListView {
+                    vertical-stretch: 1;
+                    for question in root.questions: Rectangle {
+                        height: question.option-count > 0 ? 166px : 112px;
+                        VerticalLayout {
+                            spacing: 6px;
+                            Text { text: question.header; color: #a995ff; font-size: 11px; }
+                            Text { text: question.question; color: #b9bbc2; font-size: 12px; wrap: word-wrap; }
+                            if question.option-count > 0: HorizontalLayout {
+                                height: 34px; spacing: 6px;
+                                SmallButton { horizontal-stretch: 1; text: question.option-a; selected: question.answer == question.option-a; clicked => { root.answer-question(question.index, question.option-a); } }
+                                if question.option-count > 1: SmallButton { horizontal-stretch: 1; text: question.option-b; selected: question.answer == question.option-b; clicked => { root.answer-question(question.index, question.option-b); } }
+                                if question.option-count > 2: SmallButton { horizontal-stretch: 1; text: question.option-c; selected: question.answer == question.option-c; clicked => { root.answer-question(question.index, question.option-c); } }
+                            }
+                            LineEdit {
+                                placeholder-text: question.option-count > 0 ? "Or type another answer" : "Type an answer";
+                                input-type: question.secret ? password : text;
+                                text: question.answer;
+                                edited(text) => { root.answer-question(question.index, text); }
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout { Rectangle { horizontal-stretch: 1; } SmallButton { width: 92px; text: "Continue"; primary: true; clicked => { root.submit-question(); } } }
+            }
+        }
+    }
+
+    if root.toast-text != "": Rectangle {
+        width: min(520px, parent.width - 40px); height: 42px;
+        x: (parent.width - self.width) / 2; y: 55px;
+        border-radius: 8px;
+        background: root.toast-error ? #4a2229 : #1f3b31;
+        border-width: 1px; border-color: root.toast-error ? #f26270 : #4ccd91;
+        Text { x: 13px; width: parent.width - 26px; text: root.toast-text; color: #f2f2f4; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+    }
+}
