@@ -8,6 +8,7 @@ use crossbeam_channel::{Receiver, unbounded};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
+    path::Path,
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -191,9 +192,12 @@ impl Controller {
         local.body = text.clone();
         local.status = "completed".into();
         if !attachments.is_empty() {
-            local
-                .body
-                .push_str(&format!("\n\n{} attachment(s)", attachments.len()));
+            let names = attachments
+                .iter()
+                .map(|path| attachment_name(path))
+                .collect::<Vec<_>>()
+                .join(", ");
+            local.body.push_str(&format!("\n\nAttached: {names}"));
         }
         self.state.conversation.push(local);
         if let Some(thread) = self
@@ -232,11 +236,7 @@ impl Controller {
             }
         }
         let mut input = vec![json!({"type":"text","text":turn_text,"text_elements":[]})];
-        input.extend(
-            attachments
-                .into_iter()
-                .map(|path| json!({"type":"localImage","path":path})),
-        );
+        input.extend(attachments.into_iter().map(attachment_input));
         let agent = self.state.active_agent();
         let turn = PendingTurn {
             input,
@@ -1172,6 +1172,42 @@ impl Controller {
 fn status(completed: bool) -> &'static str {
     if completed { "completed" } else { "running" }
 }
+
+fn attachment_input(path: String) -> Value {
+    let name = attachment_name(&path);
+    if has_extension(
+        &path,
+        &[
+            "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif", "tiff",
+        ],
+    ) {
+        json!({"type":"localImage","path":path})
+    } else if has_extension(&path, &["mp3", "wav", "m4a", "ogg", "flac", "aac", "webm"]) {
+        json!({"type":"localAudio","path":path})
+    } else {
+        json!({"type":"mention","name":name,"path":path})
+    }
+}
+
+fn attachment_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_owned()
+}
+
+fn has_extension(path: &str, extensions: &[&str]) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extensions
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
+}
+
 fn string_field(value: &Value, field: &str) -> String {
     value
         .get(field)
@@ -1351,5 +1387,21 @@ mod tests {
         assert_eq!(controller.state.active_agent().effort, "high");
         assert_eq!(controller.state.prefs.summary_model, "gpt-5.6-luna");
         assert_eq!(controller.state.prefs.summary_effort, "low");
+    }
+
+    #[test]
+    fn attachments_use_the_protocol_input_for_their_file_type() {
+        assert_eq!(
+            attachment_input(r"C:\tmp\screen.PNG".into()),
+            json!({"type":"localImage","path":r"C:\tmp\screen.PNG"})
+        );
+        assert_eq!(
+            attachment_input(r"C:\tmp\meeting.wav".into()),
+            json!({"type":"localAudio","path":r"C:\tmp\meeting.wav"})
+        );
+        assert_eq!(
+            attachment_input(r"C:\tmp\notes.pdf".into()),
+            json!({"type":"mention","name":"notes.pdf","path":r"C:\tmp\notes.pdf"})
+        );
     }
 }
