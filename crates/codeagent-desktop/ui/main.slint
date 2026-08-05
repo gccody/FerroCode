@@ -728,7 +728,7 @@ export component MainWindow inherits Window {
                                         if root.paste-image() { return accept; }
                                         return reject;
                                     }
-                                    if event.text == "\n" && event.modifiers.control {
+                                    if event.text == "\n" && !event.modifiers.shift {
                                         if composer.text != "" { root.send-message(composer.text); composer.text = ""; }
                                         return accept;
                                     }
