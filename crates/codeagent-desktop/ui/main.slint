@@ -21,6 +21,7 @@ export struct QuestionRow {
     index: int, header: string, question: string, answer: string, secret: bool,
     option-count: int, option-a: string, option-b: string, option-c: string
 }
+export struct AttachmentRow { index: int, name: string, preview: image, image: bool }
 
 component BrandMark inherits Rectangle {
     width: 18px; height: 18px;
@@ -143,6 +144,41 @@ component ComposerEdit inherits Rectangle {
         wrap: word-wrap;
         single-line: false;
         key-pressed(event) => { root.key-pressed(event) }
+    }
+}
+
+component AttachmentPreview inherits Rectangle {
+    in property <AttachmentRow> attachment;
+    callback remove(int);
+    width: attachment.image ? 92px : 150px;
+    height: 66px;
+    border-radius: 8px;
+    background: #222329;
+    border-width: 1px;
+    border-color: #3a3c44;
+    clip: true;
+
+    if attachment.image: Image {
+        x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+        source: attachment.preview;
+        image-fit: cover;
+    }
+    if !attachment.image: Rectangle {
+        x: 8px; y: 11px; width: 32px; height: 42px;
+        border-radius: 4px; background: #343640;
+        Text { text: "FILE"; color: #b7b9c2; font-size: 8px; horizontal-alignment: TextHorizontalAlignment.center; vertical-alignment: TextVerticalAlignment.center; }
+    }
+    if !attachment.image: Text {
+        x: 48px; y: 7px; width: parent.width - 58px; height: parent.height - 14px;
+        text: attachment.name; color: #dedfe4; font-size: 11px;
+        wrap: word-wrap; overflow: elide;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+    Rectangle {
+        x: parent.width - 22px; y: 4px; width: 18px; height: 18px;
+        border-radius: 9px; background: remove-touch.has-hover ? #d75c68 : #202126dd;
+        Text { text: "×"; color: #ffffff; font-size: 14px; horizontal-alignment: TextHorizontalAlignment.center; vertical-alignment: TextVerticalAlignment.center; }
+        remove-touch := TouchArea { mouse-cursor: pointer; clicked => { root.remove(root.attachment.index); } }
     }
 }
 
@@ -444,7 +480,6 @@ export component MainWindow inherits Window {
     in property <int> context-percent: 0;
     in property <bool> busy: false;
     in property <bool> has-project: false;
-    in-out property <int> attachment-count: 0;
     in-out property <bool> inspector-visible: false;
     in-out property <int> inspector-tab: 0;
     in-out property <bool> settings-visible: false;
@@ -468,6 +503,7 @@ export component MainWindow inherits Window {
     in property <string> approval-detail: "";
     in property <bool> approval-session: false;
     in property <[QuestionRow]> questions;
+    in property <[AttachmentRow]> attachments;
     in property <string> toast-text: "";
     in property <bool> toast-error: false;
 
@@ -480,6 +516,8 @@ export component MainWindow inherits Window {
     callback send-message(string);
     callback stop-turn;
     callback attach-files;
+    callback paste-image() -> bool;
+    callback remove-attachment(int);
     callback select-model(string);
     callback select-effort(string);
     callback select-sandbox(string);
@@ -668,13 +706,13 @@ export component MainWindow inherits Window {
                     }
 
                     Rectangle {
-                        height: 132px;
+                        height: root.attachments.length > 0 ? 210px : 132px;
                         background: #0d0e10;
                         border-width: 1px;
                         border-color: #292a2f;
                         composer-shell := Rectangle {
                             width: min(parent.width - 38px, 820px);
-                            height: 116px;
+                            height: root.attachments.length > 0 ? 194px : 116px;
                             x: (parent.width - self.width) / 2;
                             y: 8px;
                             background: #17181d;
@@ -686,6 +724,10 @@ export component MainWindow inherits Window {
                                 enabled: root.connected && root.has-project && !root.busy;
                                 placeholder-text: !root.has-project ? "Add a project folder before starting a thread" : root.connected ? "Ask for a follow-up or describe a task" : "Waiting for Codex CLI...";
                                 key-pressed(event) => {
+                                    if event.modifiers.control && (event.text == "v" || event.text == "V") {
+                                        if root.paste-image() { return accept; }
+                                        return reject;
+                                    }
                                     if event.text == "\n" && event.modifiers.control {
                                         if composer.text != "" { root.send-message(composer.text); composer.text = ""; }
                                         return accept;
@@ -693,18 +735,30 @@ export component MainWindow inherits Window {
                                     return reject;
                                 }
                             }
+                            if root.attachments.length > 0: ScrollView {
+                                x: 12px; y: 72px; width: parent.width - 24px; height: 74px;
+                                horizontal-scrollbar-policy: as-needed;
+                                vertical-scrollbar-policy: always-off;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    for attachment in root.attachments: AttachmentPreview {
+                                        attachment: attachment;
+                                        remove(index) => { root.remove-attachment(index); }
+                                    }
+                                }
+                            }
                             HorizontalLayout {
-                                x: 12px; y: 75px; width: parent.width - 24px; height: 31px; spacing: 7px;
+                                x: 12px; y: root.attachments.length > 0 ? 153px : 75px; width: parent.width - 24px; height: 31px; spacing: 7px;
                                 Rectangle {
-                                    width: root.attachment-count > 0 ? 108px : 82px; height: 30px;
+                                    width: 82px; height: 30px;
                                     border-radius: 7px;
-                                    background: root.attachment-count > 0 ? #332b4d : attach-touch.has-hover ? #35363c : #26272c;
-                                    border-width: 1px; border-color: root.attachment-count > 0 ? #6955a8 : #35373d;
+                                    background: attach-touch.has-hover ? #35363c : #26272c;
+                                    border-width: 1px; border-color: #35373d;
                                     PaperclipMark { x: 9px; y: (parent.height - self.height) / 2; }
                                     Text {
                                         x: 32px; width: parent.width - 39px;
-                                        text: root.attachment-count > 0 ? "Attached " + root.attachment-count : "Attach";
-                                        color: root.attachment-count > 0 ? #d8ccff : #d0d1d6;
+                                        text: "Attach";
+                                        color: #d0d1d6;
                                         font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide;
                                     }
                                     attach-touch := TouchArea { enabled: root.has-project; mouse-cursor: root.has-project ? pointer : default; clicked => { root.attach-files(); } }

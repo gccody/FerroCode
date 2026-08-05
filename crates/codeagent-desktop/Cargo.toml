@@ -8,10 +8,16 @@ description = "A lightweight Slint control surface for Codex"
 build = "build.rs"
 
 [dependencies]
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 codeagent-app.workspace = true
 codeagent-core.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 slint.workspace = true
 rfd = { version = "0.15", default-features = false }
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5.4"
 
 [build-dependencies]
 slint-build.workspace = true
@@ -19,4 +25,3 @@ slint-build.workspace = true
 [[bin]]
 name = "codeagent"
 path = "src/main.rs"
-

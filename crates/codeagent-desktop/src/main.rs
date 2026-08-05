@@ -5,15 +5,26 @@ use codeagent_core::{
     ApprovalChoice, ConversationItem, ItemKind, LocalStore, SandboxChoice, format_token_count,
     short_path,
 };
-use slint::{ComponentHandle, ModelRc, SharedString, StyledText, Timer, TimerMode, VecModel};
+use slint::{
+    ComponentHandle, Image, ModelRc, SharedString, StyledText, Timer, TimerMode, VecModel,
+};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, HashSet},
+    path::{Path, PathBuf},
     rc::Rc,
     time::Duration,
 };
 
 slint::include_modules!();
+
+#[derive(Clone)]
+struct PendingAttachment {
+    path: PathBuf,
+    name: String,
+    preview: Image,
+    is_image: bool,
+}
 
 fn main() -> Result<(), slint::PlatformError> {
     let store = LocalStore::discover();
@@ -22,9 +33,16 @@ fn main() -> Result<(), slint::PlatformError> {
     controller.borrow_mut().start();
     let ui = MainWindow::new()?;
     let search = Rc::new(RefCell::new(String::new()));
-    let attachments = Rc::new(RefCell::new(Vec::<String>::new()));
+    let attachments = Rc::new(RefCell::new(Vec::<PendingAttachment>::new()));
+    let attachment_temp_dir = Rc::new(tempfile::tempdir().ok());
 
-    wire_callbacks(&ui, &controller, &search, &attachments);
+    wire_callbacks(
+        &ui,
+        &controller,
+        &search,
+        &attachments,
+        &attachment_temp_dir,
+    );
     sync_ui(&ui, &controller.borrow(), &search.borrow());
 
     let weak_ui = ui.as_weak();
@@ -63,7 +81,8 @@ fn wire_callbacks(
     ui: &MainWindow,
     controller: &Rc<RefCell<Controller>>,
     search: &Rc<RefCell<String>>,
-    attachments: &Rc<RefCell<Vec<String>>>,
+    attachments: &Rc<RefCell<Vec<PendingAttachment>>>,
+    attachment_temp_dir: &Rc<Option<tempfile::TempDir>>,
 ) {
     let weak = ui.as_weak();
     let controller_ref = controller.clone();
@@ -119,12 +138,15 @@ fn wire_callbacks(
     let search_ref = search.clone();
     let attachment_ref = attachments.clone();
     ui.on_send_message(move |text| {
-        let files = std::mem::take(&mut *attachment_ref.borrow_mut());
+        let files = std::mem::take(&mut *attachment_ref.borrow_mut())
+            .into_iter()
+            .map(|attachment| attachment.path.to_string_lossy().into_owned())
+            .collect();
         controller_ref
             .borrow_mut()
             .send_prompt(text.to_string(), files);
         if let Some(ui) = weak.upgrade() {
-            ui.set_attachment_count(0);
+            sync_attachment_ui(&ui, &attachment_ref.borrow());
             sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
         }
     });
@@ -143,18 +165,80 @@ fn wire_callbacks(
     let attachment_ref = attachments.clone();
     ui.on_attach_files(move || {
         let files = rfd::FileDialog::new()
-            .set_title("Attach images")
-            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp"])
+            .set_title("Attach files")
             .pick_files()
             .unwrap_or_default();
-        attachment_ref.borrow_mut().extend(
-            files
-                .into_iter()
-                .map(|path| path.to_string_lossy().into_owned()),
-        );
+        attachment_ref
+            .borrow_mut()
+            .extend(files.into_iter().map(pending_attachment));
         if let Some(ui) = weak.upgrade() {
-            ui.set_attachment_count(attachment_ref.borrow().len().min(i32::MAX as usize) as i32);
+            sync_attachment_ui(&ui, &attachment_ref.borrow());
         }
+    });
+
+    let weak = ui.as_weak();
+    let attachment_ref = attachments.clone();
+    ui.on_remove_attachment(move |index| {
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
+        let mut attachments = attachment_ref.borrow_mut();
+        if index < attachments.len() {
+            attachments.remove(index);
+        }
+        if let Some(ui) = weak.upgrade() {
+            sync_attachment_ui(&ui, &attachments);
+        }
+    });
+
+    let weak = ui.as_weak();
+    let attachment_ref = attachments.clone();
+    let temp_dir_ref = attachment_temp_dir.clone();
+    let paste_sequence = Rc::new(Cell::new(0_u64));
+    ui.on_paste_image(move || {
+        let clipboard_files = clipboard_file_paths();
+        if !clipboard_files.is_empty() {
+            attachment_ref
+                .borrow_mut()
+                .extend(clipboard_files.into_iter().map(pending_attachment));
+            if let Some(ui) = weak.upgrade() {
+                sync_attachment_ui(&ui, &attachment_ref.borrow());
+            }
+            return true;
+        }
+        let Some(temp_dir) = temp_dir_ref.as_ref() else {
+            return false;
+        };
+        let Some((width, height, bytes)) = arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut clipboard| clipboard.get_image().ok())
+            .map(|image| (image.width, image.height, image.bytes.into_owned()))
+        else {
+            return false;
+        };
+        let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
+            return false;
+        };
+        let sequence = paste_sequence.get().saturating_add(1);
+        paste_sequence.set(sequence);
+        let path = temp_dir.path().join(format!("pasted-image-{sequence}.png"));
+        if image::save_buffer_with_format(
+            &path,
+            &bytes,
+            width,
+            height,
+            image::ColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        attachment_ref.borrow_mut().push(pending_attachment(path));
+        if let Some(ui) = weak.upgrade() {
+            sync_attachment_ui(&ui, &attachment_ref.borrow());
+        }
+        true
     });
 
     let weak = ui.as_weak();
@@ -429,6 +513,62 @@ fn callback_with_string<F, R>(
             }
         }),
     );
+}
+
+fn pending_attachment(path: PathBuf) -> PendingAttachment {
+    let is_image = is_image_path(&path);
+    let preview = if is_image {
+        Image::load_from_path(&path).unwrap_or_default()
+    } else {
+        Image::default()
+    };
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Attachment")
+        .to_owned();
+    PendingAttachment {
+        path,
+        name,
+        preview,
+        is_image,
+    }
+}
+
+fn sync_attachment_ui(ui: &MainWindow, attachments: &[PendingAttachment]) {
+    ui.set_attachments(model(
+        attachments
+            .iter()
+            .enumerate()
+            .map(|(index, attachment)| AttachmentRow {
+                index: index.min(i32::MAX as usize) as i32,
+                name: attachment.name.clone().into(),
+                preview: attachment.preview.clone(),
+                image: attachment.is_image,
+            })
+            .collect::<Vec<_>>(),
+    ));
+}
+
+fn is_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tif" | "tiff"
+            )
+        })
+}
+
+#[cfg(windows)]
+fn clipboard_file_paths() -> Vec<PathBuf> {
+    clipboard_win::get_clipboard(clipboard_win::formats::FileList).unwrap_or_default()
+}
+
+#[cfg(not(windows))]
+fn clipboard_file_paths() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
@@ -921,13 +1061,17 @@ fn styled_block(kind: &str, markdown: &str, reasoning: bool) -> MarkdownBlock {
         .unwrap_or_else(|_| StyledText::from_plain_text(markdown));
     let line_height = if reasoning { 15.0 } else { 16.0 };
     let height = wrapped_line_count(markdown, 112) as f32 * line_height;
+    // StyledText can paint Segoe UI descenders slightly below the estimated
+    // line box. Leave a little vertical room so letters such as g, p, and y
+    // are not clipped at the bottom of an assistant message.
+    const GLYPH_OVERFLOW: f32 = 2.0;
     MarkdownBlock {
         kind: kind.into(),
         text,
         block_height: if kind == "quote" {
-            height + 14.0
+            height + 14.0 + GLYPH_OVERFLOW
         } else {
-            height.max(line_height)
+            height.max(line_height) + GLYPH_OVERFLOW
         },
         ..empty_markdown_block()
     }
@@ -1388,10 +1532,10 @@ mod tests {
         reasoning.body = "x".repeat(113);
 
         assert_eq!(message_height(&multiline, &[]), 77.0);
-        assert_eq!(message_height(&wrapped, &markdown_blocks(&wrapped)), 42.0);
+        assert_eq!(message_height(&wrapped, &markdown_blocks(&wrapped)), 44.0);
         assert_eq!(
             message_height(&reasoning, &markdown_blocks(&reasoning)),
-            40.0
+            42.0
         );
         assert_eq!(wrapped_line_count("", 92), 1);
         assert_eq!(wrapped_line_count(&"x".repeat(92), 92), 1);

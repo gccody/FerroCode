@@ -12,7 +12,7 @@ The desktop UI is implemented in [Slint](https://slint.dev/) with its software r
 - Model, reasoning-effort, sandbox, and approval controls
 - Native command and file-change approvals
 - Structured `request_user_input` questions
-- Image attachments through native Windows pickers
+- Image paste previews and arbitrary file attachments through native Windows pickers
 - Stop/interrupt support
 - Thread search and removal
 - Workspace file list, activity timeline, and Git status inspector
