@@ -242,6 +242,31 @@ fn wire_callbacks(
     });
 
     let weak = ui.as_weak();
+    ui.on_copy_code(move |text| {
+        let result = arboard::Clipboard::new()
+            .and_then(|mut clipboard| clipboard.set_text(text.to_string()));
+        if let Some(ui) = weak.upgrade() {
+            match result {
+                Ok(()) => {
+                    ui.set_toast_text("Code copied to clipboard".into());
+                    ui.set_toast_error(false);
+                }
+                Err(error) => {
+                    ui.set_toast_text(format!("Could not copy code: {error}").into());
+                    ui.set_toast_error(true);
+                }
+            }
+        }
+
+        let clear_weak = weak.clone();
+        Timer::single_shot(Duration::from_secs(2), move || {
+            if let Some(ui) = clear_weak.upgrade() {
+                ui.set_toast_text("".into());
+            }
+        });
+    });
+
+    let weak = ui.as_weak();
     let controller_ref = controller.clone();
     let search_ref = search.clone();
     ui.on_search_threads(move |value| {
@@ -920,7 +945,7 @@ fn parse_markdown_blocks(markdown: &str, reasoning: bool) -> Vec<MarkdownBlock> 
             continue;
         }
 
-        if let Some((marker, count)) = opening_fence(lines[index]) {
+        if let Some((marker, count, language)) = opening_fence(lines[index]) {
             index += 1;
             let mut code = Vec::new();
             while index < lines.len() && !closing_fence(lines[index], marker, count) {
@@ -930,7 +955,7 @@ fn parse_markdown_blocks(markdown: &str, reasoning: bool) -> Vec<MarkdownBlock> 
             if index < lines.len() {
                 index += 1;
             }
-            blocks.push(code_block(&code.join("\n")));
+            blocks.push(code_block(&code.join("\n"), language));
             continue;
         }
 
@@ -947,7 +972,7 @@ fn parse_markdown_blocks(markdown: &str, reasoning: bool) -> Vec<MarkdownBlock> 
                 );
                 index += 1;
             }
-            blocks.push(code_block(&code.join("\n")));
+            blocks.push(code_block(&code.join("\n"), "text"));
             continue;
         }
 
@@ -1046,6 +1071,7 @@ fn empty_markdown_block() -> MarkdownBlock {
         kind: "".into(),
         text: StyledText::default(),
         raw_text: "".into(),
+        language: "".into(),
         level: 0,
         block_height: 0.0,
         column_count: 0,
@@ -1097,11 +1123,17 @@ fn heading_block(level: i32, markdown: &str) -> MarkdownBlock {
     }
 }
 
-fn code_block(code: &str) -> MarkdownBlock {
+fn code_block(code: &str, language: &str) -> MarkdownBlock {
     MarkdownBlock {
         kind: "code".into(),
         raw_text: code.into(),
-        block_height: wrapped_line_count(code, 105) as f32 * 16.0 + 14.0,
+        language: if language.is_empty() {
+            "text"
+        } else {
+            language
+        }
+        .into(),
+        block_height: wrapped_line_count(code, 105) as f32 * 16.0 + 42.0,
         ..empty_markdown_block()
     }
 }
@@ -1203,7 +1235,7 @@ fn markdown_visible_len(markdown: &str) -> usize {
     count
 }
 
-fn opening_fence(line: &str) -> Option<(char, usize)> {
+fn opening_fence(line: &str) -> Option<(char, usize, &str)> {
     let trimmed = line.trim_start();
     if line.len() - trimmed.len() > 3 {
         return None;
@@ -1213,7 +1245,15 @@ fn opening_fence(line: &str) -> Option<(char, usize)> {
         return None;
     }
     let count = trimmed.chars().take_while(|ch| *ch == marker).count();
-    (count >= 3).then_some((marker, count))
+    if count < 3 {
+        return None;
+    }
+    let info = trimmed[count..].trim();
+    if marker == '`' && info.contains('`') {
+        return None;
+    }
+    let language = info.split_whitespace().next().unwrap_or_default();
+    Some((marker, count, language))
 }
 
 fn closing_fence(line: &str, marker: char, count: usize) -> bool {
@@ -1740,6 +1780,8 @@ mod tests {
         );
         assert_eq!(blocks[0].level, 1);
         assert_eq!(blocks[3].raw_text.as_str(), "let value = **literal**;");
+        assert_eq!(blocks[3].language.as_str(), "rust");
+        assert_eq!(blocks[3].block_height, 58.0);
     }
 
     #[test]
