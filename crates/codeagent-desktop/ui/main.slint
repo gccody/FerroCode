@@ -5,7 +5,7 @@ export struct ThreadRow { id: string, project-id: string, title: string, subtitl
 export struct MarkdownTableCell { text: styled-text, alignment: string, column-width: length }
 export struct MarkdownTableRow { cells: [MarkdownTableCell], header: bool, row-height: length }
 export struct MarkdownBlock {
-    kind: string, text: styled-text, raw-text: string, level: int,
+    kind: string, text: styled-text, raw-text: string, language: string, level: int,
     block-height: length, column-count: int, table-width: length, table-height: length,
     table-rows: [MarkdownTableRow]
 }
@@ -45,6 +45,14 @@ component MenuMark inherits Path {
     viewbox-width: 15; viewbox-height: 13;
     fill: transparent; stroke: #aeb0b8; stroke-width: 1.8px;
     stroke-line-cap: round;
+}
+
+component CopyMark inherits Path {
+    width: 14px; height: 14px;
+    commands: "M 9 9 H 22 V 22 H 9 Z M 5 15 H 2 V 2 H 15 V 5";
+    viewbox-width: 24; viewbox-height: 24;
+    fill: transparent; stroke: #aeb0b8; stroke-width: 2px;
+    stroke-line-cap: round; stroke-line-join: round;
 }
 
 component SmallButton inherits Rectangle {
@@ -184,6 +192,7 @@ component AttachmentPreview inherits Rectangle {
 
 component MessageCard inherits Rectangle {
     in property <MessageRow> message;
+    callback copy-code(string);
     horizontal-stretch: 1;
     height: message.row-height;
     background: transparent;
@@ -270,7 +279,31 @@ component MessageCard inherits Rectangle {
                 background: #17181d;
                 border-width: 1px; border-color: #303138; border-radius: 6px;
                 Text {
-                    x: 10px; y: 7px; width: parent.width - 20px; height: parent.height - 14px;
+                    x: 10px; y: 1px; width: parent.width - 54px; height: 32px;
+                    text: block.language;
+                    color: #8f919a;
+                    font-family: "Cascadia Mono";
+                    font-size: 11px;
+                    vertical-alignment: TextVerticalAlignment.center;
+                    overflow: elide;
+                }
+                Rectangle {
+                    x: parent.width - 35px; y: 5px; width: 28px; height: 24px;
+                    border-radius: 5px;
+                    background: copy-touch.has-hover ? #303138 : transparent;
+                    border-width: 1px;
+                    border-color: copy-touch.has-hover ? #474951 : transparent;
+                    accessible-role: button;
+                    accessible-label: "Copy code";
+                    CopyMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                    copy-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.copy-code(block.raw-text); }
+                    }
+                }
+                Rectangle { x: 1px; y: 33px; width: parent.width - 2px; height: 1px; background: #292a30; }
+                Text {
+                    x: 10px; y: 35px; width: parent.width - 20px; height: parent.height - 42px;
                     text: block.raw-text;
                     color: #d7d5de;
                     font-family: "Cascadia Mono";
@@ -518,6 +551,7 @@ export component MainWindow inherits Window {
     callback attach-files;
     callback paste-image() -> bool;
     callback remove-attachment(int);
+    callback copy-code(string);
     callback select-model(string);
     callback select-effort(string);
     callback select-sandbox(string);
@@ -700,7 +734,10 @@ export component MainWindow inherits Window {
                                 height: parent.height;
                                 vertical-scrollbar-policy: as-needed;
                                 horizontal-scrollbar-policy: always-off;
-                                for message in root.messages: MessageCard { message: message; }
+                                for message in root.messages: MessageCard {
+                                    message: message;
+                                    copy-code(text) => { root.copy-code(text); }
+                                }
                             }
                         }
                     }
