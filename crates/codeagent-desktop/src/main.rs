@@ -660,8 +660,15 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     if !thread_rows_match(&ui.get_threads(), &threads) {
         ui.set_threads(model(threads));
     }
-    ui.set_messages(model(message_rows(&state.conversation)));
     ui.set_active_thread_id(state.active_local_thread.clone().unwrap_or_default().into());
+    if sync_message_rows(ui, message_rows(&state.conversation)) {
+        let revision = ui.get_message_revision();
+        ui.set_message_revision(if revision == i32::MAX {
+            0
+        } else {
+            revision + 1
+        });
+    }
 
     let title = state
         .active_local_thread
@@ -949,6 +956,56 @@ fn thread_rows_match(current: &ModelRc<ThreadRow>, next: &[ThreadRow]) -> bool {
                     && current.completed_unread == next.completed_unread
             })
         })
+}
+
+fn sync_message_rows(ui: &MainWindow, next: Vec<MessageRow>) -> bool {
+    let current = ui.get_messages();
+    let Some(current) = current.as_any().downcast_ref::<VecModel<MessageRow>>() else {
+        ui.set_messages(model(next));
+        return true;
+    };
+    update_message_rows(current, next)
+}
+
+fn update_message_rows(current: &VecModel<MessageRow>, next: Vec<MessageRow>) -> bool {
+    let shared_len = current.row_count().min(next.len());
+    let same_rows = (0..shared_len).all(|index| {
+        current
+            .row_data(index)
+            .is_some_and(|row| row.id == next[index].id)
+    });
+    if !same_rows {
+        current.set_vec(next);
+        return true;
+    }
+
+    let mut changed = current.row_count() != next.len();
+    for (index, row) in next.iter().take(shared_len).enumerate() {
+        if current
+            .row_data(index)
+            .is_some_and(|current| !message_rows_match(&current, row))
+        {
+            current.set_row_data(index, row.clone());
+            changed = true;
+        }
+    }
+
+    while current.row_count() > next.len() {
+        current.remove(current.row_count() - 1);
+    }
+    current.extend(next.into_iter().skip(shared_len));
+    changed
+}
+
+fn message_rows_match(current: &MessageRow, next: &MessageRow) -> bool {
+    current.id == next.id
+        && current.kind == next.kind
+        && current.title == next.title
+        && current.body == next.body
+        && current.status == next.status
+        && current.user == next.user
+        && current.activity == next.activity
+        && current.row_height == next.row_height
 }
 
 fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
@@ -1824,6 +1881,58 @@ mod tests {
         assert_eq!(rows[2].id.as_str(), "command");
         assert!(rows[2].activity);
         assert_eq!(rows[2].row_height, 42.0);
+    }
+
+    #[test]
+    fn streamed_message_updates_preserve_unchanged_rows_and_append_in_place() {
+        let mut first = ConversationItem::new("first", ItemKind::Assistant, "Codex");
+        first.body = "Stable history".into();
+        first.status = "completed".into();
+        let mut streaming = ConversationItem::new("streaming", ItemKind::Assistant, "Codex");
+        streaming.body = "Partial".into();
+
+        let current = VecModel::from(message_rows(&[first.clone(), streaming.clone()]));
+        let unchanged_blocks = current.row_data(0).unwrap().markdown_blocks;
+        streaming.body.push_str(" response");
+        let mut tool = ConversationItem::new("tool", ItemKind::Tool, "Search");
+        tool.status = "completed".into();
+
+        assert!(update_message_rows(
+            &current,
+            message_rows(&[first, streaming, tool])
+        ));
+
+        assert_eq!(current.row_count(), 3);
+        assert_eq!(
+            current.row_data(0).unwrap().markdown_blocks,
+            unchanged_blocks
+        );
+        assert_eq!(
+            current.row_data(1).unwrap().body.as_str(),
+            "Partial response"
+        );
+        assert_eq!(current.row_data(2).unwrap().id.as_str(), "tool");
+    }
+
+    #[test]
+    fn replacing_conversation_resets_rows_when_message_ids_change() {
+        let first = ConversationItem::new("first", ItemKind::User, "User");
+        let replacement = ConversationItem::new("replacement", ItemKind::User, "User");
+        let current = VecModel::from(message_rows(&[first]));
+
+        assert!(update_message_rows(&current, message_rows(&[replacement])));
+
+        assert_eq!(current.row_count(), 1);
+        assert_eq!(current.row_data(0).unwrap().id.as_str(), "replacement");
+    }
+
+    #[test]
+    fn unchanged_messages_do_not_emit_a_stream_revision() {
+        let mut message = ConversationItem::new("message", ItemKind::Assistant, "Codex");
+        message.body = "No changes".into();
+        let current = VecModel::from(message_rows(&[message.clone()]));
+
+        assert!(!update_message_rows(&current, message_rows(&[message])));
     }
 
     #[test]

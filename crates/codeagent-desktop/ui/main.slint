@@ -534,6 +534,7 @@ export component MainWindow inherits Window {
     in property <[ProjectRow]> projects;
     in property <[ThreadRow]> threads;
     in property <[MessageRow]> messages;
+    in property <int> message-revision: 0;
     in property <[FileRow]> files;
     in property <[string]> activity;
     in property <[string]> model-names;
@@ -615,12 +616,31 @@ export component MainWindow inherits Window {
 
     changed inspector-visible => { root.set-inspector(root.inspector-visible); }
     changed active-thread-id => {
+        root.follow-latest = root.active-thread-id != "";
         // ListView discovers variable-height delegates lazily. A few event-loop
         // passes let its estimated viewport height settle before the final seek.
         root.scroll-latest-attempts = root.active-thread-id == "" ? 0 : 3;
     }
+    private property <int> message-count: root.messages.length;
+    changed message-count => {
+        if root.active-thread-id != ""
+            && root.message-count > 0
+            && root.messages[root.message-count - 1].user {
+            // Sending a new prompt always starts a fresh follow cycle.
+            root.follow-latest = true;
+            root.scroll-latest-attempts = 3;
+        }
+    }
+    changed message-revision => {
+        if root.active-thread-id != "" && root.follow-latest {
+            root.scroll-latest-attempts = 3;
+        }
+    }
 
+    private property <bool> follow-latest: true;
     private property <int> scroll-latest-attempts: 0;
+    private property <bool> user-scroll-pending: false;
+    private property <length> user-scroll-origin-y: 0px;
     scroll-latest-timer := Timer {
         interval: 1ms;
         running: root.scroll-latest-attempts > 0;
@@ -630,6 +650,25 @@ export component MainWindow inherits Window {
                 conversation.visible-height - conversation.viewport-height
             );
             root.scroll-latest-attempts -= 1;
+        }
+    }
+    user-scroll-settle-timer := Timer {
+        interval: 250ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.user-scroll-pending = false;
+            // Mouse-wheel scrolling is animated for 180 ms. Test the final
+            // position only after that animation and ListView measurement settle.
+            if root.active-thread-id != ""
+                && conversation.viewport-y <= root.user-scroll-origin-y + 1px
+                && conversation.viewport-y <= min(
+                    0px,
+                    conversation.visible-height - conversation.viewport-height
+                ) + 64px {
+                root.follow-latest = true;
+                root.scroll-latest-attempts = 3;
+            }
         }
     }
 
@@ -842,6 +881,18 @@ export component MainWindow inherits Window {
                                 height: parent.height;
                                 vertical-scrollbar-policy: as-needed;
                                 horizontal-scrollbar-policy: always-off;
+                                scrolled => {
+                                    // This callback is emitted by user input, but for a mouse
+                                    // wheel it fires before the smooth-scroll animation runs.
+                                    if !root.user-scroll-pending {
+                                        root.user-scroll-origin-y = conversation.viewport-y;
+                                        root.user-scroll-pending = true;
+                                    }
+                                    root.follow-latest = false;
+                                    root.scroll-latest-attempts = 0;
+                                    user-scroll-settle-timer.stop();
+                                    user-scroll-settle-timer.start();
+                                }
                                 for message in root.messages: MessageCard {
                                     message: message;
                                     copy-code(text) => { root.copy-code(text); }
