@@ -2,6 +2,7 @@
 
 mod controller;
 mod state;
+mod update;
 mod workspace;
 
 pub use controller::Controller;

@@ -17,6 +17,7 @@ The desktop UI is implemented in [Slint](https://slint.dev/) with its software r
 - Thread search and removal
 - Workspace file list, activity timeline, and Git status inspector
 - Codex account, plan, model, and context-window information
+- In-app Codex update notifications with one-click installation
 
 ## Requirements
 

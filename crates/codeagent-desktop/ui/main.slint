@@ -1,6 +1,6 @@
 import { ComboBox, LineEdit, ListView, ScrollView, Spinner } from "std-widgets.slint";
 
-export struct ProjectRow { id: string, name: string, path: string, active: bool }
+export struct ProjectRow { id: string, name: string, path: string, active: bool, collapsed: bool }
 export struct ThreadRow { id: string, project-id: string, title: string, subtitle: string, active: bool, busy: bool }
 export struct MarkdownTableCell { text: styled-text, alignment: string, column-width: length }
 export struct MarkdownTableRow { cells: [MarkdownTableCell], header: bool, row-height: length }
@@ -374,6 +374,14 @@ component ChevronDown inherits Path {
     stroke-line-cap: round; stroke-line-join: round;
 }
 
+component ChevronRight inherits Path {
+    width: 8px; height: 12px;
+    commands: "M 1 1 L 6.5 6 L 1 11";
+    viewbox-width: 8; viewbox-height: 12;
+    fill: transparent; stroke: #a7a9b0; stroke-width: 1.7px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
 component CloseMark inherits Path {
     width: 12px; height: 12px;
     commands: "M 1.5 1.5 L 10.5 10.5 M 10.5 1.5 L 1.5 10.5";
@@ -539,9 +547,12 @@ export component MainWindow inherits Window {
     in property <[AttachmentRow]> attachments;
     in property <string> toast-text: "";
     in property <bool> toast-error: false;
+    in property <string> codex-update-version: "";
+    in property <bool> codex-update-in-progress: false;
 
     callback add-project;
     callback select-project(string);
+    callback toggle-project(string);
     callback new-thread;
     callback open-thread(string);
     callback archive-thread(string);
@@ -566,6 +577,7 @@ export component MainWindow inherits Window {
     callback submit-question;
     callback refresh-usage;
     callback consume-reset;
+    callback update-codex;
     callback set-inspector(bool);
     callback set-respect-gitignore(bool);
 
@@ -592,6 +604,37 @@ export component MainWindow inherits Window {
                 }
                 Rectangle { y: (parent.height - self.height) / 2; width: 8px; height: 8px; border-radius: 4px; background: root.connected ? #55d49a : #d6a54b; }
                 Text { text: root.connection-text; color: #a0a2aa; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; }
+            }
+        }
+
+        if root.codex-update-version != "": Rectangle {
+            height: 48px;
+            background: #201a35;
+            border-width: 1px;
+            border-color: #493b76;
+            HorizontalLayout {
+                padding-left: 18px; padding-right: 18px; spacing: 12px;
+                Text {
+                    text: "Codex " + root.codex-update-version + " is available";
+                    color: #e3ddfb;
+                    font-size: 12px;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+                Text {
+                    text: "Update now, then restart CodeAgent to use the new version.";
+                    color: #9e95bb;
+                    font-size: 11px;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                SmallButton {
+                    width: 116px;
+                    y: (parent.height - self.height) / 2;
+                    text: root.codex-update-in-progress ? "Updating..." : "Update Codex";
+                    primary: true;
+                    enabled: !root.codex-update-in-progress;
+                    clicked => { root.update-codex(); }
+                }
             }
         }
 
@@ -638,13 +681,26 @@ export component MainWindow inherits Window {
                                     height: 38px;
                                     border-radius: 6px;
                                     background: project-touch.has-hover ? #1b1c20 : transparent;
-                                    ChevronDown { x: 5px; y: 15px; }
-                                    Text { x: 77px; width: parent.width - 106px; text: project.name; color: #e8e8eb; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                                    if !project.collapsed: ChevronDown { x: 5px; y: 15px; }
+                                    if project.collapsed: ChevronRight { x: 7px; y: 13px; }
+                                    Text {
+                                        x: 28px;
+                                        width: parent.width - 56px;
+                                        text: project.name;
+                                        color: #e8e8eb;
+                                        font-size: 12px;
+                                        horizontal-alignment: TextHorizontalAlignment.center;
+                                        vertical-alignment: TextVerticalAlignment.center;
+                                        overflow: elide;
+                                    }
                                     ExternalMark { x: parent.width - 23px; y: 12px; }
-                                    project-touch := TouchArea { mouse-cursor: pointer; clicked => { root.select-project(project.id); } }
+                                    project-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.toggle-project(project.id); }
+                                    }
                                 }
                                 for thread in root.threads: Rectangle {
-                                    visible: thread.project-id == project.id;
+                                    visible: thread.project-id == project.id && !project.collapsed;
                                     height: 42px;
                                     x: 17px;
                                     width: 213px;
