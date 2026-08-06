@@ -116,14 +116,6 @@ component PlusMark inherits Path {
     stroke-line-cap: round;
 }
 
-component MenuMark inherits Path {
-    width: 15px; height: 13px;
-    commands: "M 1 2 L 14 2 M 1 6.5 L 14 6.5 M 1 11 L 14 11";
-    viewbox-width: 15; viewbox-height: 13;
-    fill: transparent; stroke: #aeb0b8; stroke-width: 1.8px;
-    stroke-line-cap: round;
-}
-
 component CopyMark inherits Path {
     width: 14px; height: 14px;
     commands: "M 9 9 H 22 V 22 H 9 Z M 5 15 H 2 V 2 H 15 V 5";
@@ -960,7 +952,7 @@ export component MainWindow inherits Window {
                 border-width: 1px;
                 border-color: #292a2f;
                 VerticalLayout {
-                    padding-left: 4px; padding-right: 7px; padding-top: 9px; padding-bottom: 4px;
+                    padding-left: 12px; padding-right: 12px; padding-top: 9px; padding-bottom: 4px;
                     spacing: 7px;
 
                     FlatButton { text: "New chat"; plus-icon: true; enabled: root.has-project; clicked => { root.new-thread(); } }
@@ -971,10 +963,6 @@ export component MainWindow inherits Window {
                         Text { text: "Projects"; color: #9799a1; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; }
                         Rectangle { horizontal-stretch: 1; }
                         Rectangle {
-                            width: 19px;
-                            MenuMark { x: 2px; y: (parent.height - self.height) / 2; }
-                        }
-                        Rectangle {
                             width: 24px;
                             PlusMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                             add-project-touch := TouchArea { mouse-cursor: pointer; clicked => { root.add-project(); } }
@@ -983,10 +971,10 @@ export component MainWindow inherits Window {
 
                     ScrollView {
                         vertical-stretch: 1;
-                        viewport-width: 230px;
+                        viewport-width: 223px;
                         horizontal-scrollbar-policy: always-off;
                         VerticalLayout {
-                            width: 230px;
+                            width: 223px;
                             spacing: 2px;
                             for project in root.projects: VerticalLayout {
                                 spacing: 1px;
@@ -1016,7 +1004,7 @@ export component MainWindow inherits Window {
                                     visible: thread.project-id == project.id && !project.collapsed;
                                     height: 42px;
                                     x: 17px;
-                                    width: 213px;
+                                    width: 206px;
                                     border-radius: 7px;
                                     background: thread.active ? #202126 : thread-touch.has-hover ? #18191c : transparent;
                                     Rectangle { x: -9px; width: 1px; height: parent.height; background: #303138; }
