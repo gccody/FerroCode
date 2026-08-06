@@ -1,7 +1,10 @@
 import { ComboBox, LineEdit, ListView, ScrollView, Spinner } from "std-widgets.slint";
 
 export struct ProjectRow { id: string, name: string, path: string, active: bool, collapsed: bool }
-export struct ThreadRow { id: string, project-id: string, title: string, subtitle: string, active: bool, busy: bool }
+export struct ThreadRow {
+    id: string, project-id: string, title: string, subtitle: string,
+    active: bool, busy: bool, completed-unread: bool
+}
 export struct MarkdownTableCell { text: styled-text, alignment: string, column-width: length }
 export struct MarkdownTableRow { cells: [MarkdownTableCell], header: bool, row-height: length }
 export struct MarkdownBlock {
@@ -29,6 +32,34 @@ component BrandMark inherits Rectangle {
     border-width: 2px;
     border-color: #7658db;
     Rectangle { width: 5px; height: 5px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 3px; background: #a893ff; }
+}
+
+component CompletedMark inherits Rectangle {
+    width: 14px; height: 14px;
+    border-radius: 7px;
+    background: #3f9f72;
+    Path {
+        x: 3px; y: 3px; width: 8px; height: 8px;
+        commands: "M 1 4 L 3.2 6.2 L 7 1.8";
+        viewbox-width: 8; viewbox-height: 8;
+        fill: transparent; stroke: #ffffff; stroke-width: 1.5px;
+        stroke-line-cap: round; stroke-line-join: round;
+    }
+}
+
+// The native Spinner can become effectively invisible with the dark Skia
+// palette, so sidebar activity uses an explicit high-contrast status badge.
+component WorkingMark inherits Rectangle {
+    width: 16px; height: 16px;
+    border-radius: 8px;
+    background: #392d63;
+    border-width: 1px;
+    border-color: #a893ff;
+    Rectangle {
+        x: 4px; y: 4px; width: 8px; height: 8px;
+        border-radius: 4px;
+        background: #c7baff;
+    }
 }
 
 component PlusMark inherits Path {
@@ -707,10 +738,11 @@ export component MainWindow inherits Window {
                                     border-radius: 7px;
                                     background: thread.active ? #202126 : thread-touch.has-hover ? #18191c : transparent;
                                     Rectangle { x: -9px; width: 1px; height: parent.height; background: #303138; }
-                                    Text { x: 20px; width: parent.width - (thread.active ? 48px : 28px); text: thread.title; color: thread.active ? #f0f0f2 : #9a9ca4; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
-                                    if thread.busy: Spinner { x: parent.width - 22px; y: 14px; width: 13px; height: 13px; }
+                                    Text { x: 20px; width: parent.width - ((thread.active || thread.busy || thread.completed-unread) ? 48px : 28px); text: thread.title; color: thread.active ? #f0f0f2 : #9a9ca4; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                                    if thread.busy: WorkingMark { x: parent.width - 24px; y: 13px; }
+                                    if thread.completed-unread && !thread.busy: CompletedMark { x: parent.width - 22px; y: 14px; }
                                     thread-touch := TouchArea { mouse-cursor: pointer; clicked => { root.open-thread(thread.id); } }
-                                    if thread.active && !thread.busy: Rectangle {
+                                    if thread.active && !thread.busy && !thread.completed-unread: Rectangle {
                                         x: parent.width - 33px; y: 7px; width: 26px; height: 28px;
                                         border-radius: 5px; background: close-touch.has-hover ? #34353a : transparent;
                                         CloseMark { x: 7px; y: 8px; }

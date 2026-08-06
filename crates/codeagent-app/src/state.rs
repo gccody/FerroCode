@@ -216,14 +216,27 @@ impl AppState {
 
     pub fn open_thread(&mut self, id: &str) -> bool {
         if self.active_local_thread.as_deref() == Some(id) {
-            return false;
+            let cleared_completion = self
+                .threads
+                .iter_mut()
+                .find(|thread| thread.id == id)
+                .is_some_and(|thread| {
+                    let was_unread = thread.unread_completion;
+                    thread.unread_completion = false;
+                    was_unread
+                });
+            if cleared_completion {
+                self.touch();
+            }
+            return cleared_completion;
         }
         self.sync_active_conversation();
-        let Some(thread) = self.threads.iter().find(|thread| thread.id == id) else {
+        let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == id) else {
             return false;
         };
         let project_id = thread.project_id.clone();
         let messages = thread.messages.clone();
+        thread.unread_completion = false;
         let Some(path) = self
             .projects
             .iter()
@@ -314,6 +327,7 @@ impl AppState {
             title_generated: false,
             messages: Vec::new(),
             context_usage: None,
+            unread_completion: false,
             agent: ThreadAgentSettings::from_preferences(&self.prefs),
         });
         self.active_local_thread = Some(id.clone());
@@ -321,6 +335,15 @@ impl AppState {
         self.activity_log.push("New conversation".into());
         self.touch();
         Some(id)
+    }
+
+    pub fn finish_turn(&mut self, id: &str) {
+        self.running_turns.remove(id);
+        if self.active_local_thread.as_deref() != Some(id)
+            && let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == id)
+        {
+            thread.unread_completion = true;
+        }
     }
 
     pub fn archive_thread(&mut self, id: &str) -> bool {
@@ -475,6 +498,60 @@ mod tests {
         assert_eq!(
             state.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Stop this thread before archiving it")
+        );
+    }
+
+    #[test]
+    fn background_completion_stays_unread_until_the_thread_is_opened() {
+        let mut state = state();
+        state.add_project(r"C:\Code\Demo".into(), 1);
+        let completed_thread = state.new_thread(2).unwrap();
+        state.running_turns.insert(completed_thread.clone(), None);
+        let active_thread = state.new_thread(3).unwrap();
+
+        state.finish_turn(&completed_thread);
+
+        assert!(!state.running_turns.contains_key(&completed_thread));
+        assert!(
+            state
+                .threads
+                .iter()
+                .find(|thread| thread.id == completed_thread)
+                .unwrap()
+                .unread_completion
+        );
+        assert_eq!(
+            state.active_local_thread.as_deref(),
+            Some(active_thread.as_str())
+        );
+
+        assert!(state.open_thread(&completed_thread));
+        assert!(
+            !state
+                .threads
+                .iter()
+                .find(|thread| thread.id == completed_thread)
+                .unwrap()
+                .unread_completion
+        );
+    }
+
+    #[test]
+    fn completing_the_visible_thread_does_not_create_an_unread_marker() {
+        let mut state = state();
+        state.add_project(r"C:\Code\Demo".into(), 1);
+        let thread = state.new_thread(2).unwrap();
+        state.running_turns.insert(thread.clone(), None);
+
+        state.finish_turn(&thread);
+
+        assert!(
+            !state
+                .threads
+                .iter()
+                .find(|candidate| candidate.id == thread)
+                .unwrap()
+                .unread_completion
         );
     }
 
