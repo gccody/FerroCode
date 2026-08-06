@@ -686,15 +686,18 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
         usage
             .map(|usage| {
                 format!(
-                    "{} / {}",
+                    "Context: {} / {} ({}%)",
                     format_token_count(usage.used_tokens),
-                    format_token_count(usage.capacity_tokens)
+                    format_token_count(usage.capacity_tokens),
+                    usage.percent()
                 )
             })
             .unwrap_or_default()
             .into(),
     );
-    ui.set_context_percent(usage.map(|usage| usage.percent() as i32).unwrap_or(0));
+    let context_percent = usage.map(|usage| usage.percent()).unwrap_or(0);
+    ui.set_context_percent(context_percent as i32);
+    ui.set_context_progress_path(context_ring_path(context_percent).into());
     ui.set_usage_left_label(
         state
             .plan_usage
@@ -875,6 +878,22 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     } else {
         ui.set_toast_text("".into());
     }
+}
+
+fn context_ring_path(percent: u32) -> String {
+    let percent = percent.min(100);
+    if percent == 0 {
+        return String::new();
+    }
+    if percent == 100 {
+        return "M 10 1 A 9 9 0 0 1 10 19 A 9 9 0 0 1 10 1".into();
+    }
+
+    let angle = -std::f64::consts::FRAC_PI_2 + (f64::from(percent) / 100.0) * std::f64::consts::TAU;
+    let end_x = 10.0 + 9.0 * angle.cos();
+    let end_y = 10.0 + 9.0 * angle.sin();
+    let large_arc = u8::from(percent > 50);
+    format!("M 10 1 A 9 9 0 {large_arc} 1 {end_x:.3} {end_y:.3}")
 }
 
 fn message_height(item: &ConversationItem, markdown_blocks: &[MarkdownBlock]) -> f32 {
@@ -1668,6 +1687,18 @@ fn append_file_rows_with_guides(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_ring_path_tracks_empty_partial_and_full_usage() {
+        assert!(context_ring_path(0).is_empty());
+        assert_eq!(context_ring_path(25), "M 10 1 A 9 9 0 0 1 19.000 10.000");
+        assert!(context_ring_path(75).contains("A 9 9 0 1 1"));
+        assert_eq!(
+            context_ring_path(100),
+            "M 10 1 A 9 9 0 0 1 10 19 A 9 9 0 0 1 10 1"
+        );
+        assert_eq!(context_ring_path(101), context_ring_path(100));
+    }
 
     #[test]
     fn user_message_height_grows_with_wrapped_content() {

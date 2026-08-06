@@ -1422,6 +1422,42 @@ mod tests {
     }
 
     #[test]
+    fn token_usage_notification_updates_the_matching_thread_immediately() {
+        let mut controller = Controller::new(PersistedState::default());
+        controller.state.add_project("demo".into(), 1);
+        let local = controller.state.new_thread(2).unwrap();
+        controller
+            .state
+            .runtime_threads
+            .insert(local.clone(), "runtime".into());
+        let previous_revision = controller.state.revision;
+
+        controller.handle_notification(
+            "thread/tokenUsage/updated",
+            json!({
+                "threadId": "runtime",
+                "turnId": "turn-1",
+                "tokenUsage": {
+                    "last": {"totalTokens": 48_000},
+                    "modelContextWindow": 120_000
+                }
+            }),
+        );
+
+        let usage = controller
+            .state
+            .threads
+            .iter()
+            .find(|thread| thread.id == local)
+            .and_then(|thread| thread.context_usage)
+            .unwrap();
+        assert_eq!(usage.used_tokens, 48_000);
+        assert_eq!(usage.capacity_tokens, 120_000);
+        assert_eq!(usage.percent(), 40);
+        assert!(controller.state.revision > previous_revision);
+    }
+
+    #[test]
     fn server_requests_queue_approvals() {
         let mut controller = Controller::new(PersistedState::default());
         controller.handle_message(json!({"id":7,"method":"item/commandExecution/requestApproval","params":{"command":"cargo test","cwd":"demo"}}));

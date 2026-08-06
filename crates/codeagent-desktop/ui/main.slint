@@ -62,6 +62,52 @@ component WorkingMark inherits Rectangle {
     }
 }
 
+component ContextIndicator inherits Rectangle {
+    in property <string> label;
+    in property <int> percent: 0;
+    in property <string> progress-path;
+    private property <string> tooltip-label: label == ""
+        ? "Context usage will appear after the first model response"
+        : label;
+
+    width: 34px;
+    height: 34px;
+    background: transparent;
+    accessible-role: text;
+    accessible-label: label == "" ? "Context usage unavailable" : label;
+
+    Rectangle {
+        x: 2px; y: 2px;
+        width: 30px; height: 30px;
+        border-radius: 15px;
+        border-width: 2px;
+        border-color: #353740;
+        background: transparent;
+    }
+    if root.progress-path != "": Path {
+        x: 2px; y: 2px;
+        width: 30px; height: 30px;
+        commands: root.progress-path;
+        viewbox-width: 20; viewbox-height: 20;
+        fill: transparent;
+        stroke: root.percent >= 90 ? #e56671 : root.percent >= 75 ? #d6a54b : #9178e8;
+        stroke-width: 2px;
+        stroke-line-cap: round;
+    }
+    Text {
+        x: 2px; y: 2px;
+        width: 30px; height: 30px;
+        text: root.label == "" ? "" : root.percent;
+        color: #b9bbc5;
+        font-size: 10px;
+        horizontal-alignment: TextHorizontalAlignment.center;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+    Tooltip {
+        text: @markdown("\{root.tooltip-label}");
+    }
+}
+
 component PlusMark inherits Path {
     width: 14px; height: 14px;
     commands: "M 7 1 L 7 13 M 1 7 L 13 7";
@@ -442,6 +488,177 @@ component PaperclipMark inherits Path {
     fill: transparent; stroke: #c3c5cc; stroke-width: 1.2px; stroke-line-cap: round; stroke-line-join: round;
 }
 
+// The composer toolbar uses a softer, rounded treatment without changing the
+// compact actions elsewhere in the application.
+component ComposerAttachButton inherits Rectangle {
+    in property <bool> enabled: true;
+    callback clicked;
+
+    width: 82px;
+    height: 34px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: #35373d;
+    background: !enabled ? #202126 : touch.pressed ? #202126 : touch.has-hover ? #35363c : #26272c;
+    accessible-role: button;
+    accessible-label: "Attach";
+    accessible-enabled: enabled;
+
+    PaperclipMark {
+        x: 11px;
+        y: (parent.height - self.height) / 2;
+    }
+    Text {
+        x: 34px;
+        width: parent.width - self.x - 11px;
+        text: "Attach";
+        color: root.enabled ? #ffffff : #797b83;
+        font-size: 12px;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+component ComposerChevron inherits Path {
+    width: 12px;
+    height: 7px;
+    commands: "M 1 1 L 6 6 L 11 1";
+    viewbox-width: 12;
+    viewbox-height: 7;
+    fill: transparent;
+    stroke: #aeb0b8;
+    stroke-width: 1.2px;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+}
+
+component ComposerComboBox inherits Rectangle {
+    in property <[string]> model;
+    in property <bool> enabled: true;
+    in-out property <int> current-index: 0;
+    callback selected(string);
+
+    private property <string> current-value: model.length > 0 && current-index >= 0 && current-index < model.length
+        ? model[current-index]
+        : "";
+    private property <int> visible-items: min(6, model.length);
+
+    height: 34px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: #35373d;
+    background: !enabled ? #202126 : select-touch.pressed ? #202126 : select-touch.has-hover ? #35363c : #26272c;
+    forward-focus: select-focus;
+    accessible-role: combobox;
+    accessible-enabled: enabled;
+    accessible-expandable: true;
+    accessible-value: current-value;
+    accessible-action-expand => { root.open-popup(); }
+
+    public function choose(index: int) {
+        if !root.enabled || index < 0 || index >= root.model.length {
+            return;
+        }
+        root.current-index = index;
+        root.selected(root.model[index]);
+        select-popup.close();
+    }
+
+    public function open-popup() {
+        if root.enabled && root.model.length > 0 {
+            select-popup.show();
+        }
+    }
+
+    Text {
+        x: 11px;
+        width: parent.width - 39px;
+        text: root.current-value;
+        color: root.enabled ? #ffffff : #797b83;
+        font-size: 12px;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+    ComposerChevron {
+        x: parent.width - self.width - 11px;
+        y: (parent.height - self.height) / 2;
+    }
+    select-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.UpArrow {
+                root.choose(max(0, root.current-index - 1));
+                return accept;
+            } else if event.text == Key.DownArrow {
+                root.choose(min(root.model.length - 1, root.current-index + 1));
+                return accept;
+            } else if event.text == Key.Return || event.text == Key.Space {
+                root.open-popup();
+                return accept;
+            }
+            return reject;
+        }
+        select-touch := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => {
+                select-focus.focus();
+                root.open-popup();
+            }
+        }
+    }
+
+    select-popup := PopupWindow {
+        x: 0px;
+        y: root.height + 4px;
+        width: root.width;
+        height: root.visible-items * 32px + 8px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            border-radius: 7px;
+            border-width: 1px;
+            border-color: #3b3d44;
+            background: #202126;
+
+            ScrollView {
+                x: 4px;
+                y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                horizontal-scrollbar-policy: always-off;
+
+                VerticalLayout {
+                    spacing: 2px;
+                    for value[index] in root.model: Rectangle {
+                        height: 30px;
+                        border-radius: 5px;
+                        background: index == root.current-index ? #3a3355 : option-touch.has-hover ? #35363c : transparent;
+                        Text {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            text: value;
+                            color: #f0f0f2;
+                            font-size: 12px;
+                            vertical-alignment: TextVerticalAlignment.center;
+                            overflow: elide;
+                        }
+                        option-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.choose(index); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 component SendMark inherits Path {
     width: 14px; height: 15px;
     commands: "M 6 11 L 6 2 M 2 6 L 6 2 L 10 6";
@@ -556,6 +773,7 @@ export component MainWindow inherits Window {
     in property <string> active-thread-id: "";
     in property <string> active-thread-title: "New thread";
     in property <string> context-label: "";
+    in property <string> context-progress-path: "";
     in property <string> usage-left-label: "";
     in property <int> context-percent: 0;
     in property <bool> busy: false;
@@ -950,25 +1168,21 @@ export component MainWindow inherits Window {
                                 }
                             }
                             HorizontalLayout {
-                                x: 12px; y: root.attachments.length > 0 ? 153px : 75px; width: parent.width - 24px; height: 31px; spacing: 7px;
-                                Rectangle {
-                                    width: 82px; height: 30px;
-                                    border-radius: 7px;
-                                    background: attach-touch.has-hover ? #35363c : #26272c;
-                                    border-width: 1px; border-color: #35373d;
-                                    PaperclipMark { x: 9px; y: (parent.height - self.height) / 2; }
-                                    Text {
-                                        x: 32px; width: parent.width - 39px;
-                                        text: "Attach";
-                                        color: #d0d1d6;
-                                        font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide;
-                                    }
-                                    attach-touch := TouchArea { enabled: root.has-project; mouse-cursor: root.has-project ? pointer : default; clicked => { root.attach-files(); } }
+                                x: 12px; y: root.attachments.length > 0 ? 153px : 75px; width: parent.width - 24px; height: 34px; spacing: 7px;
+                                ComposerAttachButton {
+                                    enabled: root.has-project;
+                                    clicked => { root.attach-files(); }
                                 }
-                                ComboBox { width: 136px; model: root.model-names; current-index <=> root.selected-model-index; selected(value) => { root.select-model(value); } }
-                                ComboBox { width: 99px; model: root.effort-names; current-index <=> root.selected-effort-index; selected(value) => { root.select-effort(value); } }
-                                ComboBox { width: 98px; model: root.sandbox-names; current-index <=> root.selected-sandbox-index; selected(value) => { root.select-sandbox(value); } }
+                                ComposerComboBox { width: 136px; model: root.model-names; current-index <=> root.selected-model-index; selected(value) => { root.select-model(value); } }
+                                ComposerComboBox { width: 99px; model: root.effort-names; current-index <=> root.selected-effort-index; selected(value) => { root.select-effort(value); } }
+                                ComposerComboBox { width: 98px; model: root.sandbox-names; current-index <=> root.selected-sandbox-index; selected(value) => { root.select-sandbox(value); } }
                                 Rectangle { horizontal-stretch: 1; }
+                                ContextIndicator {
+                                    y: (parent.height - self.height) / 2;
+                                    label: root.context-label;
+                                    percent: root.context-percent;
+                                    progress-path: root.context-progress-path;
+                                }
                                 if root.busy: Rectangle {
                                     width: 31px; height: 31px; border-radius: 16px;
                                     background: stop-touch.has-hover ? #dc5965 : #c94855;
@@ -976,11 +1190,6 @@ export component MainWindow inherits Window {
                                     accessible-label: "Stop";
                                     StopMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                                     stop-touch := TouchArea { mouse-cursor: pointer; clicked => { root.stop-turn(); } }
-                                }
-                                if !root.busy: Rectangle {
-                                    width: 20px; height: 20px; border-radius: 10px;
-                                    y: (parent.height - self.height) / 2;
-                                    border-width: 2px; border-color: #30323a; background: transparent;
                                 }
                                 if !root.busy: Rectangle {
                                     width: 31px; height: 31px; border-radius: 16px;
@@ -1196,9 +1405,10 @@ export component MainWindow inherits Window {
     if root.toast-text != "": Rectangle {
         width: min(520px, parent.width - 40px); height: 42px;
         x: (parent.width - self.width) / 2; y: 55px;
+        clip: true;
         border-radius: 8px;
         background: root.toast-error ? #4a2229 : #1f3b31;
         border-width: 1px; border-color: root.toast-error ? #f26270 : #4ccd91;
-        Text { x: 13px; width: parent.width - 26px; text: root.toast-text; color: #f2f2f4; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+        Text { x: 13px; width: parent.width - 26px; height: parent.height; text: root.toast-text; color: #f2f2f4; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
     }
 }
