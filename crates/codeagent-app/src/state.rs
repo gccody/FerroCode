@@ -384,7 +384,7 @@ impl AppState {
     }
 
     pub fn error(&mut self, message: impl Into<String>) {
-        let message = message.into();
+        let message = format_error_message(&message.into());
         self.activity_log.push(format!("Error: {message}"));
         self.toast = Some(Toast {
             message,
@@ -402,6 +402,27 @@ impl AppState {
     }
 }
 
+fn format_error_message(message: &str) -> String {
+    let message = message.trim();
+    let json = serde_json::from_str::<Value>(message).ok().or_else(|| {
+        let start = message.find('{')?;
+        serde_json::from_str::<Value>(&message[start..]).ok()
+    });
+
+    if let Some(json) = json {
+        for pointer in ["/error/message", "/detail/message", "/message"] {
+            if let Some(text) = json.pointer(pointer).and_then(Value::as_str) {
+                return text.split_whitespace().collect::<Vec<_>>().join(" ");
+            }
+        }
+        if let Some(text) = json.get("error").and_then(Value::as_str) {
+            return text.split_whitespace().collect::<Vec<_>>().join(" ");
+        }
+    }
+
+    message.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,6 +430,52 @@ mod tests {
 
     fn state() -> AppState {
         AppState::from_persisted(PersistedState::default())
+    }
+
+    #[test]
+    fn errors_extract_a_readable_message_from_api_json() {
+        let mut state = state();
+        state.error(
+            r#"{
+                "error": {
+                    "message": "Provided authentication token is expired.",
+                    "type": null,
+                    "code": "token_expired"
+                },
+                "status": 401
+            }"#,
+        );
+
+        assert_eq!(
+            state.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Provided authentication token is expired.")
+        );
+        assert_eq!(
+            state.activity_log.last().map(String::as_str),
+            Some("Error: Provided authentication token is expired.")
+        );
+    }
+
+    #[test]
+    fn errors_extract_json_after_a_status_prefix() {
+        let mut state = state();
+        state.error("request failed with status 401: {\"detail\":{\"message\":\"Token expired\"}}");
+
+        assert_eq!(
+            state.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Token expired")
+        );
+    }
+
+    #[test]
+    fn multiline_plain_text_errors_are_collapsed_for_the_toast() {
+        let mut state = state();
+        state.error("First line\n  second line");
+
+        assert_eq!(
+            state.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("First line second line")
+        );
     }
 
     #[test]
