@@ -661,6 +661,7 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
         ui.set_threads(model(threads));
     }
     ui.set_messages(model(message_rows(&state.conversation)));
+    ui.set_active_thread_id(state.active_local_thread.clone().unwrap_or_default().into());
 
     let title = state
         .active_local_thread

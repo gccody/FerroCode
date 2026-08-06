@@ -546,6 +546,7 @@ export component MainWindow inherits Window {
     in property <string> plan-label: "";
     in property <string> workspace-path: "";
     in property <string> workspace-name: "Workspace";
+    in property <string> active-thread-id: "";
     in property <string> active-thread-title: "New thread";
     in property <string> context-label: "";
     in property <string> usage-left-label: "";
@@ -613,6 +614,24 @@ export component MainWindow inherits Window {
     callback set-respect-gitignore(bool);
 
     changed inspector-visible => { root.set-inspector(root.inspector-visible); }
+    changed active-thread-id => {
+        // ListView discovers variable-height delegates lazily. A few event-loop
+        // passes let its estimated viewport height settle before the final seek.
+        root.scroll-latest-attempts = root.active-thread-id == "" ? 0 : 3;
+    }
+
+    private property <int> scroll-latest-attempts: 0;
+    scroll-latest-timer := Timer {
+        interval: 1ms;
+        running: root.scroll-latest-attempts > 0;
+        triggered => {
+            conversation.viewport-y = min(
+                0px,
+                conversation.visible-height - conversation.viewport-height
+            );
+            root.scroll-latest-attempts -= 1;
+        }
+    }
 
     VerticalLayout {
         spacing: 0px;
@@ -815,7 +834,8 @@ export component MainWindow inherits Window {
                             Text { text: "What should we build?"; color: #ededf0; font-size: 22px; horizontal-alignment: TextHorizontalAlignment.center; }
                             Text { text: root.has-project ? "Ask CodeAgent to work in this project" : "Add a project folder to start"; color: #858790; font-size: 12px; horizontal-alignment: TextHorizontalAlignment.center; }
                         }
-                        if root.messages.length > 0: Rectangle {
+                        Rectangle {
+                            visible: root.messages.length > 0;
                             conversation := ListView {
                                 x: max(16px, (parent.width - 850px) / 2);
                                 width: min(parent.width - 32px, 850px);
