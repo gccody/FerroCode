@@ -50,6 +50,8 @@ pub struct AppState {
     pub user_question: Option<QuestionRequest>,
     pub user_question_queue: VecDeque<QuestionRequest>,
     pub toast: Option<Toast>,
+    pub codex_update_version: Option<String>,
+    pub codex_update_in_progress: bool,
     pub activity_log: Vec<String>,
     pub git_diff: String,
     pub files: Vec<String>,
@@ -80,6 +82,8 @@ impl AppState {
             user_question: None,
             user_question_queue: VecDeque::new(),
             toast: None,
+            codex_update_version: None,
+            codex_update_in_progress: false,
             activity_log: vec!["CodeAgent launched".into()],
             git_diff: String::new(),
             files: Vec::new(),
@@ -255,6 +259,15 @@ impl AppState {
         true
     }
 
+    pub fn toggle_project(&mut self, id: &str) -> bool {
+        let Some(project) = self.projects.iter_mut().find(|project| project.id == id) else {
+            return false;
+        };
+        project.collapsed = !project.collapsed;
+        self.touch();
+        true
+    }
+
     pub fn add_project(&mut self, path: String, now: i64) -> String {
         if let Some(existing) = self
             .projects
@@ -277,6 +290,7 @@ impl AppState {
             name,
             path: path.clone(),
             created_at: now,
+            collapsed: false,
         });
         self.active_project = Some(id.clone());
         self.active_local_thread = None;
@@ -409,6 +423,17 @@ mod tests {
         let second = state.add_project(r"c:\code\demo".into(), 2);
         assert_eq!(first, second);
         assert_eq!(state.projects.len(), 1);
+    }
+
+    #[test]
+    fn project_headers_toggle_their_thread_visibility_state() {
+        let mut state = state();
+        let project = state.add_project(r"C:\Code\Demo".into(), 1);
+        assert!(!state.projects[0].collapsed);
+        assert!(state.toggle_project(&project));
+        assert!(state.projects[0].collapsed);
+        assert!(state.toggle_project(&project));
+        assert!(!state.projects[0].collapsed);
     }
 
     #[test]

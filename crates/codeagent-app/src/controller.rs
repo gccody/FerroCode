@@ -1,4 +1,4 @@
-use crate::{AppState, Question, QuestionRequest, workspace};
+use crate::{AppState, Question, QuestionRequest, update, workspace};
 use codeagent_core::{
     Approval, ContextWindowUsage, ConversationItem, ItemKind, PersistedState, PlanUsage,
     truncate_text,
@@ -68,6 +68,8 @@ pub struct Controller {
     backend: Option<CodexBackend>,
     backend_start: Option<Receiver<Result<CodexBackend, String>>>,
     workspace_rx: Option<Receiver<(String, Vec<String>)>>,
+    update_check_rx: Option<Receiver<Result<Option<String>, String>>>,
+    update_install_rx: Option<Receiver<Result<(), String>>>,
     pending: HashMap<u64, PendingCall>,
     summary_pending: HashSet<String>,
     active_summaries: HashMap<String, ActiveSummary>,
@@ -81,6 +83,8 @@ impl Controller {
             backend: None,
             backend_start: None,
             workspace_rx: None,
+            update_check_rx: None,
+            update_install_rx: None,
             pending: HashMap::new(),
             summary_pending: HashSet::new(),
             active_summaries: HashMap::new(),
@@ -107,6 +111,7 @@ impl Controller {
             });
         self.state.touch();
         self.refresh_workspace();
+        self.check_for_codex_update();
     }
 
     pub fn poll(&mut self) -> bool {
@@ -137,7 +142,95 @@ impl Controller {
             self.state.files = files;
             self.state.touch();
         }
+        if let Some(result) = self
+            .update_check_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok())
+        {
+            self.update_check_rx = None;
+            match result {
+                Ok(version) => {
+                    self.state.codex_update_version = version;
+                    self.state.touch();
+                }
+                Err(error) => {
+                    self.state
+                        .activity_log
+                        .push(format!("Codex update check unavailable: {error}"));
+                    self.state.touch();
+                }
+            }
+        }
+        if let Some(result) = self
+            .update_install_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok())
+        {
+            self.update_install_rx = None;
+            self.state.codex_update_in_progress = false;
+            match result {
+                Ok(()) => {
+                    let version = self
+                        .state
+                        .codex_update_version
+                        .take()
+                        .unwrap_or_else(|| "latest version".into());
+                    self.state
+                        .activity_log
+                        .push(format!("Updated Codex to {version}"));
+                    self.state.info(format!(
+                        "Codex {version} installed. Restart CodeAgent to use it."
+                    ));
+                }
+                Err(error) => self.state.error(error),
+            }
+        }
         previous != self.state.revision
+    }
+
+    fn check_for_codex_update(&mut self) {
+        if self.update_check_rx.is_some() || self.update_install_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = unbounded();
+        self.update_check_rx = Some(rx);
+        if let Err(error) = thread::Builder::new()
+            .name("codex-update-check".into())
+            .spawn(move || {
+                let _ = tx.send(update::check());
+            })
+        {
+            self.update_check_rx = None;
+            self.state.activity_log.push(format!(
+                "Codex update check unavailable: could not start worker: {error}"
+            ));
+            self.state.touch();
+        }
+    }
+
+    pub fn update_codex(&mut self) {
+        if self.state.codex_update_version.is_none()
+            || self.state.codex_update_in_progress
+            || self.update_install_rx.is_some()
+        {
+            return;
+        }
+
+        self.state.codex_update_in_progress = true;
+        self.state.touch();
+        let (tx, rx) = unbounded();
+        self.update_install_rx = Some(rx);
+        if let Err(error) = thread::Builder::new()
+            .name("codex-update-install".into())
+            .spawn(move || {
+                let _ = tx.send(update::install());
+            })
+        {
+            self.update_install_rx = None;
+            self.state.codex_update_in_progress = false;
+            self.state
+                .error(format!("Could not start the Codex update: {error}"));
+        }
     }
 
     pub fn add_project(&mut self, path: String) {
@@ -150,6 +243,13 @@ impl Controller {
         if self.state.select_project(id) {
             self.refresh_workspace();
         }
+    }
+
+    pub fn toggle_project(&mut self, id: &str) {
+        if self.state.active_project.as_deref() != Some(id) {
+            self.select_project(id);
+        }
+        self.state.toggle_project(id);
     }
 
     pub fn open_thread(&mut self, id: &str) {

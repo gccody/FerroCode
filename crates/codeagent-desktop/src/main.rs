@@ -112,6 +112,22 @@ fn wire_callbacks(
         ui,
         controller,
         search,
+        MainWindow::on_toggle_project,
+        |controller, value| controller.toggle_project(value),
+    );
+    let weak = ui.as_weak();
+    let controller_ref = controller.clone();
+    let search_ref = search.clone();
+    ui.on_update_codex(move || {
+        controller_ref.borrow_mut().update_codex();
+        if let Some(ui) = weak.upgrade() {
+            sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
+        }
+    });
+    callback_with_string(
+        ui,
+        controller,
+        search,
         MainWindow::on_open_thread,
         |controller, value| controller.open_thread(value),
     );
@@ -615,6 +631,14 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     );
     ui.set_has_project(state.active_project.is_some());
     ui.set_busy(state.active_thread_busy());
+    ui.set_codex_update_version(
+        state
+            .codex_update_version
+            .clone()
+            .unwrap_or_default()
+            .into(),
+    );
+    ui.set_codex_update_in_progress(state.codex_update_in_progress);
     ui.set_inspector_visible(state.prefs.show_inspector || ui.get_inspector_visible());
 
     ui.set_projects(model(state.projects.iter().map(|project| ProjectRow {
@@ -622,6 +646,7 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
         name: project.name.clone().into(),
         path: project.path.clone().into(),
         active: state.active_project.as_deref() == Some(&project.id),
+        collapsed: project.collapsed,
     })));
 
     ui.set_threads(model(thread_rows(state, search)));

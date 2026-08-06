@@ -7,6 +7,8 @@ pub struct Project {
     pub name: String,
     pub path: String,
     pub created_at: i64,
+    #[serde(default)]
+    pub collapsed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -474,6 +476,7 @@ mod tests {
                 name: "Δemo".into(),
                 path: r"C:\code\demo".into(),
                 created_at: 1,
+                collapsed: false,
             }],
             threads: vec![LocalThread {
                 id: "t".into(),
