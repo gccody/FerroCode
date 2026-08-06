@@ -449,6 +449,12 @@ component SendMark inherits Path {
     fill: transparent; stroke: #e3def8; stroke-width: 1.8px; stroke-line-cap: round; stroke-line-join: round;
 }
 
+component StopMark inherits Rectangle {
+    width: 8px; height: 8px;
+    border-radius: 1px;
+    background: #fff2f3;
+}
+
 component InspectorMark inherits Path {
     width: 16px; height: 14px;
     commands: "M 1 1 L 13 1 L 13 11 L 1 11 Z M 9 1 L 9 11";
@@ -963,7 +969,14 @@ export component MainWindow inherits Window {
                                 ComboBox { width: 99px; model: root.effort-names; current-index <=> root.selected-effort-index; selected(value) => { root.select-effort(value); } }
                                 ComboBox { width: 98px; model: root.sandbox-names; current-index <=> root.selected-sandbox-index; selected(value) => { root.select-sandbox(value); } }
                                 Rectangle { horizontal-stretch: 1; }
-                                if root.busy: SmallButton { width: 58px; text: "Stop"; danger: true; clicked => { root.stop-turn(); } }
+                                if root.busy: Rectangle {
+                                    width: 31px; height: 31px; border-radius: 16px;
+                                    background: stop-touch.has-hover ? #dc5965 : #c94855;
+                                    accessible-role: button;
+                                    accessible-label: "Stop";
+                                    StopMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                    stop-touch := TouchArea { mouse-cursor: pointer; clicked => { root.stop-turn(); } }
+                                }
                                 if !root.busy: Rectangle {
                                     width: 20px; height: 20px; border-radius: 10px;
                                     y: (parent.height - self.height) / 2;
