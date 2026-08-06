@@ -6,7 +6,7 @@ use codeagent_core::{
     short_path,
 };
 use slint::{
-    ComponentHandle, Image, ModelRc, SharedString, StyledText, Timer, TimerMode, VecModel,
+    ComponentHandle, Image, Model, ModelRc, SharedString, StyledText, Timer, TimerMode, VecModel,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -641,15 +641,25 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     ui.set_codex_update_in_progress(state.codex_update_in_progress);
     ui.set_inspector_visible(state.prefs.show_inspector || ui.get_inspector_visible());
 
-    ui.set_projects(model(state.projects.iter().map(|project| ProjectRow {
-        id: project.id.clone().into(),
-        name: project.name.clone().into(),
-        path: project.path.clone().into(),
-        active: state.active_project.as_deref() == Some(&project.id),
-        collapsed: project.collapsed,
-    })));
+    let projects = state
+        .projects
+        .iter()
+        .map(|project| ProjectRow {
+            id: project.id.clone().into(),
+            name: project.name.clone().into(),
+            path: project.path.clone().into(),
+            active: state.active_project.as_deref() == Some(&project.id),
+            collapsed: project.collapsed,
+        })
+        .collect::<Vec<_>>();
+    if !project_rows_match(&ui.get_projects(), &projects) {
+        ui.set_projects(model(projects));
+    }
 
-    ui.set_threads(model(thread_rows(state, search)));
+    let threads = thread_rows(state, search);
+    if !thread_rows_match(&ui.get_threads(), &threads) {
+        ui.set_threads(model(threads));
+    }
     ui.set_messages(model(message_rows(&state.conversation)));
 
     let title = state
@@ -907,8 +917,37 @@ fn thread_rows(state: &AppState, search: &str) -> Vec<ThreadRow> {
             .into(),
             active: state.active_local_thread.as_deref() == Some(&thread.id),
             busy: state.running_turns.contains_key(&thread.id),
+            completed_unread: thread.unread_completion,
         })
         .collect()
+}
+
+fn project_rows_match(current: &ModelRc<ProjectRow>, next: &[ProjectRow]) -> bool {
+    current.row_count() == next.len()
+        && next.iter().enumerate().all(|(index, next)| {
+            current.row_data(index).is_some_and(|current| {
+                current.id == next.id
+                    && current.name == next.name
+                    && current.path == next.path
+                    && current.active == next.active
+                    && current.collapsed == next.collapsed
+            })
+        })
+}
+
+fn thread_rows_match(current: &ModelRc<ThreadRow>, next: &[ThreadRow]) -> bool {
+    current.row_count() == next.len()
+        && next.iter().enumerate().all(|(index, next)| {
+            current.row_data(index).is_some_and(|current| {
+                current.id == next.id
+                    && current.project_id == next.project_id
+                    && current.title == next.title
+                    && current.subtitle == next.subtitle
+                    && current.active == next.active
+                    && current.busy == next.busy
+                    && current.completed_unread == next.completed_unread
+            })
+        })
 }
 
 fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
@@ -1571,7 +1610,6 @@ fn append_file_rows_with_guides(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slint::Model;
 
     #[test]
     fn user_message_height_grows_with_wrapped_content() {
@@ -1736,6 +1774,12 @@ mod tests {
             ConversationItem::new("m3", ItemKind::Assistant, "Codex"),
         ]);
         state.running_turns.insert(second_thread.clone(), None);
+        state
+            .threads
+            .iter_mut()
+            .find(|thread| thread.id == first_thread)
+            .unwrap()
+            .unread_completion = true;
 
         let rows = thread_rows(&state, "");
         assert_eq!(rows.len(), 2);
@@ -1746,6 +1790,13 @@ mod tests {
         assert!(rows[0].busy);
         assert_eq!(rows[1].project_id.as_str(), first_project);
         assert_eq!(rows[1].subtitle.as_str(), "1 message");
+        assert!(rows[1].completed_unread);
+
+        let rendered_rows = model(rows.clone());
+        assert!(thread_rows_match(&rendered_rows, &rows));
+        let mut changed_rows = rows.clone();
+        changed_rows[0].busy = false;
+        assert!(!thread_rows_match(&rendered_rows, &changed_rows));
 
         let filtered = thread_rows(&state, "  nEwEsT  ");
         assert_eq!(filtered.len(), 1);

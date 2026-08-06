@@ -25,6 +25,8 @@ pub struct LocalThread {
     #[serde(default)]
     pub context_usage: Option<ContextWindowUsage>,
     #[serde(default)]
+    pub unread_completion: bool,
+    #[serde(default)]
     pub agent: ThreadAgentSettings,
 }
 
@@ -490,6 +492,7 @@ mod tests {
                     used_tokens: 24_000,
                     capacity_tokens: 120_000,
                 }),
+                unread_completion: true,
                 agent: ThreadAgentSettings::default(),
             }],
             active_project: Some("p".into()),

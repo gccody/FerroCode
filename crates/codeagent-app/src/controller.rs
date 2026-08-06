@@ -954,7 +954,7 @@ impl Controller {
             }
             "turn/completed" => {
                 if let Some(local_id) = self.local_thread_id(&params) {
-                    self.state.running_turns.remove(&local_id);
+                    self.state.finish_turn(&local_id);
                 }
                 let status = params
                     .pointer("/turn/status")
