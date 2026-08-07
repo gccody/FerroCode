@@ -262,6 +262,15 @@ impl Controller {
         self.state.new_thread(unix_timestamp());
     }
 
+    pub fn new_thread_for_project(&mut self, id: &str) {
+        if self.state.active_project.as_deref() != Some(id) {
+            self.select_project(id);
+        }
+        if self.state.active_project.as_deref() == Some(id) {
+            self.new_thread();
+        }
+    }
+
     pub fn archive_thread(&mut self, id: &str) {
         self.state.archive_thread(id);
     }
@@ -1382,6 +1391,30 @@ fn clean_summary(raw: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_new_chat_switches_projects_before_creating_the_thread() {
+        let mut controller = Controller::new(PersistedState::default());
+        let first_project = controller.state.add_project("first".into(), 1);
+        let second_project = controller.state.add_project("second".into(), 2);
+        assert_eq!(
+            controller.state.active_project.as_deref(),
+            Some(second_project.as_str())
+        );
+
+        controller.new_thread_for_project(&first_project);
+
+        assert_eq!(
+            controller.state.active_project.as_deref(),
+            Some(first_project.as_str())
+        );
+        assert_eq!(controller.state.threads.len(), 1);
+        assert_eq!(controller.state.threads[0].project_id, first_project);
+        assert_eq!(
+            controller.state.active_local_thread.as_deref(),
+            Some(controller.state.threads[0].id.as_str())
+        );
+    }
 
     #[test]
     fn streamed_delta_updates_active_conversation_without_backend() {
