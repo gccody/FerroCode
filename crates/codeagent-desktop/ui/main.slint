@@ -658,6 +658,14 @@ component InspectorMark inherits Path {
     stroke-line-cap: round; stroke-line-join: round;
 }
 
+component SidebarMark inherits Path {
+    width: 16px; height: 14px;
+    commands: "M 1 1 L 15 1 L 15 13 L 1 13 Z M 5 1 L 5 13";
+    viewbox-width: 16; viewbox-height: 14;
+    fill: transparent; stroke: #aaa4c4; stroke-width: 1.65px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
 component FileTreeNode inherits Rectangle {
     in property <FileRow> node;
     in property <length> tree-origin: 13px;
@@ -757,6 +765,8 @@ export component MainWindow inherits Window {
     in property <int> context-percent: 0;
     in property <bool> busy: false;
     in property <bool> has-project: false;
+    in-out property <bool> sidebar-visible: true;
+    in-out property <string> sidebar-search-text: "";
     in-out property <bool> inspector-visible: false;
     in-out property <int> inspector-tab: 0;
     in-out property <bool> settings-visible: false;
@@ -952,7 +962,7 @@ export component MainWindow inherits Window {
             spacing: 0px;
 
             Rectangle {
-                width: 247px;
+                width: root.sidebar-visible ? 247px : 53px;
                 background: #0f1012;
                 border-width: 1px;
                 border-color: #292a2f;
@@ -960,121 +970,164 @@ export component MainWindow inherits Window {
                     padding-left: 12px; padding-right: 12px; padding-top: 9px; padding-bottom: 7px;
                     spacing: 7px;
 
-                    LineEdit { height: 28px; placeholder-text: "Search"; edited(text) => { root.search-threads(text); } }
-                    Rectangle { height: 14px; }
                     HorizontalLayout {
-                        height: 22px;
-                        Text { text: "Projects"; color: #9799a1; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; }
-                        Rectangle { horizontal-stretch: 1; }
+                        height: 28px;
+                        spacing: 7px;
                         Rectangle {
-                            width: 24px;
-                            PlusMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
-                            add-project-touch := TouchArea { mouse-cursor: pointer; clicked => { root.add-project(); } }
+                            width: 28px; height: 28px;
+                            border-radius: 6px;
+                            background: sidebar-toggle-touch.has-hover ? #24252a : transparent;
+                            accessible-role: button;
+                            accessible-label: root.sidebar-visible ? "Collapse sidebar" : "Expand sidebar";
+                            SidebarMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                            sidebar-toggle-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.sidebar-visible = !root.sidebar-visible; }
+                            }
+                        }
+                        if root.sidebar-visible: LineEdit {
+                            height: 28px;
+                            text <=> root.sidebar-search-text;
+                            placeholder-text: "Search";
+                            edited(text) => { root.search-threads(text); }
                         }
                     }
 
-                    ScrollView {
+                    if root.sidebar-visible: VerticalLayout {
                         vertical-stretch: 1;
-                        viewport-width: 223px;
-                        horizontal-scrollbar-policy: always-off;
-                        VerticalLayout {
-                            width: 223px;
-                            spacing: 2px;
-                            for project in root.projects: VerticalLayout {
-                                spacing: 1px;
-                                Rectangle {
-                                    height: 38px;
-                                    border-radius: 6px;
-                                    background: project-touch.has-hover ? #1b1c20 : transparent;
-                                    if !project.collapsed: ChevronDown { x: 5px; y: 15px; }
-                                    if project.collapsed: ChevronRight { x: 7px; y: 13px; }
-                                    Text {
-                                        x: 28px;
-                                        width: parent.width - 56px;
-                                        text: project.name;
-                                        color: #e8e8eb;
-                                        font-size: 12px;
-                                        horizontal-alignment: TextHorizontalAlignment.center;
-                                        vertical-alignment: TextVerticalAlignment.center;
-                                        overflow: elide;
-                                    }
-                                    project-touch := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.toggle-project(project.id); }
-                                    }
+                        spacing: 7px;
+
+                        Rectangle { height: 14px; }
+                        HorizontalLayout {
+                            height: 22px;
+                            Text { text: "Projects"; color: #9799a1; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Rectangle {
+                                width: 24px;
+                                PlusMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                add-project-touch := TouchArea { mouse-cursor: pointer; clicked => { root.add-project(); } }
+                            }
+                        }
+
+                        ScrollView {
+                            vertical-stretch: 1;
+                            viewport-width: 223px;
+                            horizontal-scrollbar-policy: always-off;
+                            VerticalLayout {
+                                width: 223px;
+                                spacing: 2px;
+                                for project in root.projects: VerticalLayout {
+                                    spacing: 1px;
                                     Rectangle {
-                                        x: parent.width - 32px; y: 5px;
-                                        width: 28px; height: 28px;
-                                        border-radius: 5px;
-                                        background: new-chat-touch.has-hover ? #34353a : transparent;
-                                        accessible-role: button;
-                                        accessible-label: "New chat in " + project.name;
-                                        NewChatMark {
-                                            x: (parent.width - self.width) / 2;
-                                            y: (parent.height - self.height) / 2;
+                                        height: 38px;
+                                        border-radius: 6px;
+                                        background: project-touch.has-hover ? #1b1c20 : transparent;
+                                        if !project.collapsed: ChevronDown { x: 5px; y: 15px; }
+                                        if project.collapsed: ChevronRight { x: 7px; y: 13px; }
+                                        Text {
+                                            x: 28px;
+                                            width: parent.width - 56px;
+                                            text: project.name;
+                                            color: #e8e8eb;
+                                            font-size: 12px;
+                                            horizontal-alignment: TextHorizontalAlignment.center;
+                                            vertical-alignment: TextVerticalAlignment.center;
+                                            overflow: elide;
                                         }
-                                        new-chat-touch := TouchArea {
+                                        project-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            clicked => { root.new-thread-for-project(project.id); }
+                                            clicked => { root.toggle-project(project.id); }
+                                        }
+                                        Rectangle {
+                                            x: parent.width - 32px; y: 5px;
+                                            width: 28px; height: 28px;
+                                            border-radius: 5px;
+                                            background: new-chat-touch.has-hover ? #34353a : transparent;
+                                            accessible-role: button;
+                                            accessible-label: "New chat in " + project.name;
+                                            NewChatMark {
+                                                x: (parent.width - self.width) / 2;
+                                                y: (parent.height - self.height) / 2;
+                                            }
+                                            new-chat-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.new-thread-for-project(project.id); }
+                                            }
                                         }
                                     }
-                                }
-                                for thread in root.threads: Rectangle {
-                                    private property <bool> shown: thread.project-id == project.id
-                                        && !project.collapsed
-                                        && (root.show-all-threads || thread.project-index < root.visible-thread-limit);
-                                    visible: self.shown;
-                                    height: self.shown ? 42px : 0px;
-                                    x: 17px;
-                                    width: 206px;
-                                    border-radius: 7px;
-                                    background: thread.active ? #202126 : thread-touch.has-hover ? #18191c : transparent;
-                                    Rectangle { x: -9px; width: 1px; height: parent.height; background: #303138; }
-                                    Text { x: 20px; width: parent.width - ((thread.active || thread.busy || thread.completed-unread) ? 48px : 28px); text: thread.title; color: thread.active ? #f0f0f2 : #9a9ca4; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
-                                    if thread.busy: WorkingMark { x: parent.width - 24px; y: 13px; }
-                                    if thread.completed-unread && !thread.busy: CompletedMark { x: parent.width - 22px; y: 14px; }
-                                    thread-touch := TouchArea { mouse-cursor: pointer; clicked => { root.open-thread(thread.id); } }
-                                    if thread.active && !thread.busy && !thread.completed-unread: Rectangle {
-                                        x: parent.width - 33px; y: 7px; width: 26px; height: 28px;
-                                        border-radius: 5px; background: close-touch.has-hover ? #34353a : transparent;
-                                        CloseMark { x: 7px; y: 8px; }
-                                        close-touch := TouchArea { mouse-cursor: pointer; clicked => { root.archive-thread(thread.id); } }
+                                    for thread in root.threads: Rectangle {
+                                        private property <bool> shown: thread.project-id == project.id
+                                            && !project.collapsed
+                                            && (root.show-all-threads || thread.project-index < root.visible-thread-limit);
+                                        visible: self.shown;
+                                        height: self.shown ? 42px : 0px;
+                                        x: 17px;
+                                        width: 206px;
+                                        border-radius: 7px;
+                                        background: thread.active ? #202126 : thread-touch.has-hover ? #18191c : transparent;
+                                        Rectangle { x: -9px; width: 1px; height: parent.height; background: #303138; }
+                                        Text { x: 20px; width: parent.width - ((thread.active || thread.busy || thread.completed-unread) ? 48px : 28px); text: thread.title; color: thread.active ? #f0f0f2 : #9a9ca4; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                                        if thread.busy: WorkingMark { x: parent.width - 24px; y: 13px; }
+                                        if thread.completed-unread && !thread.busy: CompletedMark { x: parent.width - 22px; y: 14px; }
+                                        thread-touch := TouchArea { mouse-cursor: pointer; clicked => { root.open-thread(thread.id); } }
+                                        if thread.active && !thread.busy && !thread.completed-unread: Rectangle {
+                                            x: parent.width - 33px; y: 7px; width: 26px; height: 28px;
+                                            border-radius: 5px; background: close-touch.has-hover ? #34353a : transparent;
+                                            CloseMark { x: 7px; y: 8px; }
+                                            close-touch := TouchArea { mouse-cursor: pointer; clicked => { root.archive-thread(thread.id); } }
+                                        }
                                     }
-                                }
-                                if !project.collapsed && project.thread-count > root.visible-thread-limit: Rectangle {
-                                    height: 30px;
-                                    x: 17px;
-                                    width: 206px;
-                                    border-radius: 6px;
-                                    background: thread-list-toggle-touch.has-hover ? #1b1c20 : transparent;
-                                    Text {
-                                        text: root.show-all-threads ? "Show less" : "Show more";
-                                        color: #a995ff;
-                                        font-size: 11px;
-                                        horizontal-alignment: TextHorizontalAlignment.center;
-                                        vertical-alignment: TextVerticalAlignment.center;
-                                    }
-                                    thread-list-toggle-touch := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.show-all-threads = !root.show-all-threads; }
+                                    if !project.collapsed && project.thread-count > root.visible-thread-limit: Rectangle {
+                                        height: 30px;
+                                        x: 17px;
+                                        width: 206px;
+                                        border-radius: 6px;
+                                        background: thread-list-toggle-touch.has-hover ? #1b1c20 : transparent;
+                                        Text {
+                                            text: root.show-all-threads ? "Show less" : "Show more";
+                                            color: #a995ff;
+                                            font-size: 11px;
+                                            horizontal-alignment: TextHorizontalAlignment.center;
+                                            vertical-alignment: TextVerticalAlignment.center;
+                                        }
+                                        thread-list-toggle-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.show-all-threads = !root.show-all-threads; }
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    Rectangle { height: 1px; background: #292a2f; }
-                    Rectangle {
+                        Rectangle { height: 1px; background: #292a2f; }
+                        Rectangle {
+                            height: 36px;
+                            border-radius: 6px;
+                            background: settings-touch.has-hover ? #1d1e22 : transparent;
+                            HorizontalLayout {
+                                alignment: LayoutAlignment.center;
+                                spacing: 10px;
+                                SettingsCog { y: (parent.height - self.height) / 2; }
+                                Text { text: "Settings"; color: #d7d8dc; font-size: 13px; vertical-alignment: TextVerticalAlignment.center; }
+                            }
+                            settings-touch := TouchArea { mouse-cursor: pointer; clicked => { root.settings-visible = true; } }
+                        }
+                    }
+                    if !root.sidebar-visible: Rectangle { vertical-stretch: 1; }
+                    if !root.sidebar-visible: Rectangle {
                         height: 36px;
                         border-radius: 6px;
-                        background: settings-touch.has-hover ? #1d1e22 : transparent;
-                        HorizontalLayout {
-                            alignment: LayoutAlignment.center;
-                            spacing: 10px;
-                            SettingsCog { y: (parent.height - self.height) / 2; }
-                            Text { text: "Settings"; color: #d7d8dc; font-size: 13px; vertical-alignment: TextVerticalAlignment.center; }
+                        background: collapsed-settings-touch.has-hover ? #1d1e22 : transparent;
+                        accessible-role: button;
+                        accessible-label: "Settings";
+                        SettingsCog {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
                         }
-                        settings-touch := TouchArea { mouse-cursor: pointer; clicked => { root.settings-visible = true; } }
+                        collapsed-settings-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.settings-visible = true; }
+                        }
                     }
                 }
             }
@@ -1092,7 +1145,24 @@ export component MainWindow inherits Window {
                         border-color: #292a2f;
                         HorizontalLayout {
                             padding-left: 20px; padding-right: 17px; spacing: 8px;
-                            Text { text: root.active-thread-title; color: #f3f3f5; font-size: 15px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                            HorizontalLayout {
+                                spacing: 0px;
+                                Text {
+                                    text: root.active-thread-id == "" ? "" : root.workspace-name + " / ";
+                                    color: #9a9ca4;
+                                    font-size: 15px;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: root.active-thread-title;
+                                    color: #f3f3f5;
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                    overflow: elide;
+                                }
+                            }
                             Rectangle { horizontal-stretch: 1; }
                             Text { text: root.workspace-path; color: #8d8f97; font-size: 10px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
                             Rectangle {
