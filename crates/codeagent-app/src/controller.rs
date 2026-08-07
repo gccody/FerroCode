@@ -67,6 +67,7 @@ pub struct Controller {
     pub state: AppState,
     backend: Option<CodexBackend>,
     backend_start: Option<Receiver<Result<CodexBackend, String>>>,
+    startup_in_progress: bool,
     workspace_rx: Option<Receiver<(String, Vec<String>)>>,
     update_check_rx: Option<Receiver<Result<Option<String>, String>>>,
     update_install_rx: Option<Receiver<Result<(), String>>>,
@@ -82,6 +83,7 @@ impl Controller {
             state: AppState::from_persisted(persisted),
             backend: None,
             backend_start: None,
+            startup_in_progress: false,
             workspace_rx: None,
             update_check_rx: None,
             update_install_rx: None,
@@ -100,6 +102,7 @@ impl Controller {
         self.pending.clear();
         self.summary_pending.clear();
         self.active_summaries.clear();
+        self.startup_in_progress = true;
         self.state.connected = false;
         self.state.connection_text = "Starting Codex…".into();
         let (tx, rx) = unbounded();
@@ -186,6 +189,28 @@ impl Controller {
             }
         }
         previous != self.state.revision
+    }
+
+    /// Returns true until the initial Codex handshake and metadata requests
+    /// have either completed or failed.
+    pub fn startup_in_progress(&self) -> bool {
+        self.startup_in_progress
+    }
+
+    fn finish_startup_if_ready(&mut self) {
+        if self.startup_in_progress
+            && !self.pending.values().any(|call| {
+                matches!(
+                    call,
+                    PendingCall::Initialize
+                        | PendingCall::Account
+                        | PendingCall::Models
+                        | PendingCall::RateLimits
+                )
+            })
+        {
+            self.startup_in_progress = false;
+        }
     }
 
     fn check_for_codex_update(&mut self) {
@@ -526,6 +551,7 @@ impl Controller {
                 self.request("initialize", json!({"clientInfo":{"name":"codeagent","title":"CodeAgent","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true,"requestAttestation":false}}), PendingCall::Initialize);
             }
             Err(error) => {
+                self.startup_in_progress = false;
                 self.state.connection_text = "Codex unavailable".into();
                 self.state.error(error);
             }
@@ -603,7 +629,7 @@ impl Controller {
                     }
                     _ => {}
                 }
-                if matches!(pending, Some(PendingCall::ConsumeReset)) {
+                if matches!(&pending, Some(PendingCall::ConsumeReset)) {
                     self.state.reset_in_progress = false;
                 }
                 if report_error {
@@ -614,6 +640,7 @@ impl Controller {
             } else if let (Some(pending), Some(result)) = (pending, message.get("result")) {
                 self.handle_response(pending, result.clone());
             }
+            self.finish_startup_if_ready();
             return;
         }
         if let Some(method) = message.get("method").and_then(Value::as_str) {
@@ -914,6 +941,7 @@ impl Controller {
         }
         match method {
             "backend/exited" | "backend/protocolError" => {
+                self.startup_in_progress = false;
                 self.state.connected = false;
                 self.state.connection_text = "Codex disconnected".into();
                 self.state.running_turns.clear();
@@ -1391,6 +1419,27 @@ fn clean_summary(raw: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_waits_for_all_initial_codex_metadata() {
+        let mut controller = Controller::new(PersistedState::default());
+        controller.startup_in_progress = true;
+        controller.pending.insert(1, PendingCall::Account);
+        controller.pending.insert(2, PendingCall::Models);
+        controller.pending.insert(3, PendingCall::RateLimits);
+
+        controller.pending.remove(&1);
+        controller.finish_startup_if_ready();
+        assert!(controller.startup_in_progress());
+
+        controller.pending.remove(&2);
+        controller.finish_startup_if_ready();
+        assert!(controller.startup_in_progress());
+
+        controller.pending.remove(&3);
+        controller.finish_startup_if_ready();
+        assert!(!controller.startup_in_progress());
+    }
 
     #[test]
     fn project_new_chat_switches_projects_before_creating_the_thread() {
