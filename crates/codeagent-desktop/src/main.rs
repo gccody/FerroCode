@@ -537,6 +537,9 @@ fn wire_callbacks(
     ui.on_refresh_usage(move || controller_ref.borrow_mut().refresh_plan_usage());
 
     let controller_ref = controller.clone();
+    ui.on_refresh_workspace(move || controller_ref.borrow_mut().restart_workspace_inspection());
+
+    let controller_ref = controller.clone();
     ui.on_consume_reset(move || controller_ref.borrow_mut().consume_reset());
 
     let controller_ref = controller.clone();
@@ -775,14 +778,16 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
             .into(),
     );
 
-    let changed = state
-        .git_diff
-        .lines()
-        .filter(|line| line.len() > 3)
-        .map(|line| line[3..].replace('/', "\\"))
+    let changes = change_rows(&state.git_diff);
+    let changed = changes
+        .iter()
+        .map(|change| change.path.to_string().replace('/', "\\"))
         .collect::<HashSet<_>>();
     ui.set_files(model(file_rows(&state.files, &changed)));
-    ui.set_git_diff(state.git_diff.clone().into());
+    ui.set_change_count(changes.len() as i32);
+    ui.set_staged_change_count(changes.iter().filter(|change| change.staged).count() as i32);
+    ui.set_unstaged_change_count(changes.iter().filter(|change| change.unstaged).count() as i32);
+    ui.set_changes(model(changes.into_iter().map(|change| change.row)));
     ui.set_activity(model(
         state
             .activity_log
@@ -1665,6 +1670,103 @@ fn model<T: Clone + 'static>(values: impl IntoIterator<Item = T>) -> ModelRc<T> 
     ModelRc::new(VecModel::from(values.into_iter().collect::<Vec<_>>()))
 }
 
+struct ParsedChangeRow {
+    row: ChangeRow,
+    path: String,
+    staged: bool,
+    unstaged: bool,
+}
+
+fn change_rows(status: &str) -> Vec<ParsedChangeRow> {
+    status
+        .lines()
+        .filter_map(|line| {
+            let bytes = line.as_bytes();
+            if bytes.len() < 4 {
+                return None;
+            }
+
+            let index_status = bytes[0] as char;
+            let worktree_status = bytes[1] as char;
+            let raw_path = line[3..].trim();
+            if raw_path.is_empty() || (index_status == '!' && worktree_status == '!') {
+                return None;
+            }
+
+            let conflicted = matches!(
+                (index_status, worktree_status),
+                ('D', 'D')
+                    | ('A', 'U')
+                    | ('U', 'D')
+                    | ('U', 'A')
+                    | ('D', 'U')
+                    | ('A', 'A')
+                    | ('U', 'U')
+            );
+            let untracked = index_status == '?' && worktree_status == '?';
+            let status_code = if conflicted {
+                '!'
+            } else if untracked {
+                'U'
+            } else if worktree_status != ' ' {
+                worktree_status
+            } else {
+                index_status
+            };
+            let status_label = match status_code {
+                'A' => "Added",
+                'D' => "Deleted",
+                'R' => "Renamed",
+                'C' => "Copied",
+                'U' if conflicted => "Conflict",
+                'U' => "Untracked",
+                '!' => "Conflict",
+                'T' => "Type changed",
+                _ => "Modified",
+            };
+            let staged = !untracked && index_status != ' ' && index_status != '?';
+            let unstaged = untracked || worktree_status != ' ';
+            let state_label = match (staged, unstaged) {
+                (true, true) => "BOTH",
+                (true, false) => "STAGED",
+                _ => "UNSTAGED",
+            };
+
+            // For renames, make the destination the prominent file name while
+            // retaining the complete old-to-new path in the supporting detail.
+            let display_path = raw_path.rsplit_once(" -> ").map_or(raw_path, |(_, to)| to);
+            let name = display_path
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(display_path);
+            let parent = display_path
+                .rfind(['/', '\\'])
+                .map(|separator| &display_path[..separator])
+                .unwrap_or("");
+            let detail = if raw_path.contains(" -> ") {
+                format!("{status_label} · {raw_path}")
+            } else if parent.is_empty() {
+                status_label.to_owned()
+            } else {
+                format!("{status_label} · {parent}")
+            };
+
+            Some(ParsedChangeRow {
+                row: ChangeRow {
+                    name: name.into(),
+                    detail: detail.into(),
+                    status: status_code.to_string().into(),
+                    status_label: status_label.into(),
+                    state_label: state_label.into(),
+                },
+                path: display_path.to_owned(),
+                staged,
+                unstaged,
+            })
+        })
+        .collect()
+}
+
 #[derive(Default)]
 struct FileTreeNode {
     directories: BTreeMap<String, FileTreeNode>,
@@ -1757,6 +1859,35 @@ fn append_file_rows_with_guides(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn change_rows_turn_git_status_into_readable_file_metadata() {
+        let rows = change_rows(
+            " M crates/app/src/main.rs\nA  docs/guide.md\n?? assets/logo.png\nR  old.txt -> src/new.txt\nUU conflicted.rs\n",
+        );
+
+        assert_eq!(rows.len(), 5);
+        assert_eq!(rows[0].row.name.as_str(), "main.rs");
+        assert_eq!(rows[0].row.detail.as_str(), "Modified · crates/app/src");
+        assert_eq!(rows[0].row.state_label.as_str(), "UNSTAGED");
+        assert!(!rows[0].staged);
+        assert!(rows[0].unstaged);
+
+        assert_eq!(rows[1].row.status.as_str(), "A");
+        assert_eq!(rows[1].row.state_label.as_str(), "STAGED");
+        assert!(rows[1].staged);
+        assert!(!rows[1].unstaged);
+
+        assert_eq!(rows[2].row.status_label.as_str(), "Untracked");
+        assert_eq!(rows[3].row.name.as_str(), "new.txt");
+        assert_eq!(
+            rows[3].row.detail.as_str(),
+            "Renamed · old.txt -> src/new.txt"
+        );
+        assert_eq!(rows[3].path, "src/new.txt");
+        assert_eq!(rows[4].row.status.as_str(), "!");
+        assert_eq!(rows[4].row.status_label.as_str(), "Conflict");
+    }
 
     #[test]
     fn context_ring_path_tracks_empty_partial_and_full_usage() {
