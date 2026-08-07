@@ -621,6 +621,9 @@ fn clipboard_file_paths() -> Vec<PathBuf> {
 
 fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     let state = &controller.state;
+    if ui.get_startup_loading() && !controller.startup_in_progress() {
+        ui.set_startup_loading(false);
+    }
     ui.set_connected(state.connected);
     ui.set_connection_text(state.connection_text.clone().into());
     ui.set_account_label(state.account.label.clone().into());

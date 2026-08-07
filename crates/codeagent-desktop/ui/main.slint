@@ -742,6 +742,7 @@ export component MainWindow inherits Window {
     in property <[string]> approval-names;
     in property <string> connection-text: "Starting Codex...";
     in property <bool> connected: false;
+    in-out property <bool> startup-loading: true;
     in property <string> account-label: "";
     in property <string> plan-label: "";
     in property <string> workspace-path: "";
@@ -874,6 +875,7 @@ export component MainWindow inherits Window {
     }
 
     VerticalLayout {
+        visible: !root.startup-loading;
         spacing: 0px;
 
         Rectangle {
@@ -1400,5 +1402,34 @@ export component MainWindow inherits Window {
         background: root.toast-error ? #4a2229 : #1f3b31;
         border-width: 1px; border-color: root.toast-error ? #f26270 : #4ccd91;
         Text { x: 13px; width: parent.width - 26px; height: parent.height; text: root.toast-text; color: #f2f2f4; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+    }
+
+    if root.startup-loading: Rectangle {
+        background: #0d0e10;
+
+        VerticalLayout {
+            width: 180px;
+            height: 72px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            alignment: center;
+            spacing: 14px;
+
+            Rectangle {
+                height: 24px;
+                background: transparent;
+                Spinner {
+                    width: 24px;
+                    height: 24px;
+                    x: (parent.width - self.width) / 2;
+                }
+            }
+            Text {
+                text: "Waiting on codex.";
+                color: #c8c9ce;
+                font-size: 12px;
+                horizontal-alignment: TextHorizontalAlignment.center;
+            }
+        }
     }
 }
