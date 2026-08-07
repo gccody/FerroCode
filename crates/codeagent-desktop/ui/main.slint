@@ -1273,6 +1273,9 @@ export component MainWindow inherits Window {
                     horizontal-scrollbar-policy: always-off;
                     VerticalLayout {
                         width: settings-body-scroll.width;
+                        // Fluent's vertical scrollbar is overlaid on the 14px at the
+                        // right edge of the viewport, so keep controls out of its gutter.
+                        padding-right: 14px;
                         spacing: 13px;
                         SectionTitle { text: "AGENT DEFAULTS"; color: #a995ff; }
                         Text { text: "Model"; color: #c9cad0; font-size: 11px; }
