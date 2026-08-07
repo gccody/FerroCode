@@ -5,6 +5,7 @@ use codeagent_core::{
     ApprovalChoice, ConversationItem, ItemKind, LocalStore, SandboxChoice, format_token_count,
     short_path,
 };
+use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{
     ComponentHandle, Image, Model, ModelRc, SharedString, StyledText, Timer, TimerMode, VecModel,
 };
@@ -32,6 +33,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let controller = Rc::new(RefCell::new(Controller::new(persisted)));
     controller.borrow_mut().start();
     let ui = MainWindow::new()?;
+    install_input_focus_dismissal(&ui);
     let search = Rc::new(RefCell::new(String::new()));
     let attachments = Rc::new(RefCell::new(Vec::<PendingAttachment>::new()));
     let attachment_temp_dir = Rc::new(tempfile::tempdir().ok());
@@ -75,6 +77,30 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.run()?;
     let _ = store.save(&controller.borrow_mut().persisted());
     Ok(())
+}
+
+fn install_input_focus_dismissal(ui: &MainWindow) {
+    let weak = ui.as_weak();
+    ui.window().on_winit_window_event(move |_, event| {
+        // This runs before Slint dispatches the press. A clicked input will
+        // focus itself again; all other targets leave editable controls unfocused.
+        let pointer_pressed = matches!(
+            event,
+            winit::event::WindowEvent::MouseInput {
+                state: winit::event::ElementState::Pressed,
+                ..
+            } | winit::event::WindowEvent::Touch(winit::event::Touch {
+                phase: winit::event::TouchPhase::Started,
+                ..
+            })
+        );
+
+        if pointer_pressed && let Some(ui) = weak.upgrade() {
+            ui.invoke_clear_input_focus();
+        }
+
+        EventResult::Propagate
+    });
 }
 
 fn wire_callbacks(
