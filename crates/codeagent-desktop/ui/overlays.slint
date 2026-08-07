@@ -1,0 +1,249 @@
+import { ComboBox, LineEdit, ListView, ScrollView, Spinner, SpinBox } from "std-widgets.slint";
+import { QuestionRow } from "types.slint";
+import { CloseMark } from "icons.slint";
+import { SectionTitle, SmallButton, ToggleSwitch } from "controls.slint";
+
+export component SettingsOverlay inherits Rectangle {
+    in property <[string]> model-names;
+    in property <[string]> default-effort-names;
+    in property <[string]> summary-effort-names;
+    in property <[string]> sandbox-names;
+    in property <[string]> approval-names;
+    in-out property <int> default-model-index: 0;
+    in-out property <int> default-effort-index: 0;
+    in-out property <int> default-sandbox-index: 1;
+    in-out property <int> selected-approval-index: 0;
+    in-out property <int> summary-model-index: 0;
+    in-out property <int> summary-effort-index: 0;
+    in-out property <int> visible-thread-limit: 5;
+    in-out property <bool> show-all-threads: false;
+    in-out property <bool> respect-gitignore: true;
+    in property <string> account-label: "";
+    in property <string> plan-label: "";
+    in property <string> usage-summary: "Usage information unavailable";
+    in property <int> reset-count: 0;
+    in property <bool> reset-in-progress: false;
+
+    callback close;
+    callback select-default-model(string);
+    callback select-default-effort(string);
+    callback select-default-sandbox(string);
+    callback select-approval(string);
+    callback select-summary-model(string);
+    callback select-summary-effort(string);
+    callback set-visible-thread-limit(int);
+    callback set-respect-gitignore(bool);
+    callback refresh-usage;
+    callback consume-reset;
+
+    background: #99000000;
+    TouchArea { clicked => { root.close(); } }
+    Rectangle {
+        width: 520px; height: min(parent.height - 30px, 690px);
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        background: #18191d; border-width: 1px; border-color: #363840; border-radius: 13px;
+        VerticalLayout {
+            padding: 20px; spacing: 13px;
+            HorizontalLayout {
+                Text { text: "Settings"; color: #f0f0f2; font-size: 20px; }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    width: 34px; height: 30px; border-radius: 6px;
+                    background: settings-close.has-hover ? #34353a : #26272c;
+                    CloseMark { x: 11px; y: 9px; }
+                    settings-close := TouchArea { mouse-cursor: pointer; clicked => { root.close(); } }
+                }
+            }
+            settings-body-scroll := ScrollView {
+                vertical-stretch: 1;
+                viewport-width: self.width;
+                horizontal-scrollbar-policy: always-off;
+                VerticalLayout {
+                    width: settings-body-scroll.width;
+                    // Fluent's vertical scrollbar is overlaid on the 14px at the
+                    // right edge of the viewport, so keep controls out of its gutter.
+                    padding-right: 14px;
+                    spacing: 13px;
+                    SectionTitle { text: "AGENT DEFAULTS"; color: #a995ff; }
+                    Text { text: "Model"; color: #c9cad0; font-size: 11px; }
+                    ComboBox { model: root.model-names; current-index <=> root.default-model-index; selected(value) => { root.select-default-model(value); } }
+                    Text { text: "Reasoning effort"; color: #c9cad0; font-size: 11px; }
+                    ComboBox { model: root.default-effort-names; current-index <=> root.default-effort-index; selected(value) => { root.select-default-effort(value); } }
+                    Text { text: "Workspace permissions"; color: #c9cad0; font-size: 11px; }
+                    ComboBox { model: root.sandbox-names; current-index <=> root.default-sandbox-index; selected(value) => { root.select-default-sandbox(value); } }
+                    Text { text: "Approval policy"; color: #c9cad0; font-size: 11px; }
+                    ComboBox { model: root.approval-names; current-index <=> root.selected-approval-index; selected(value) => { root.select-approval(value); } }
+                    Rectangle { height: 1px; background: #2b2d33; }
+                    SectionTitle { text: "THREADS"; color: #a995ff; }
+                    Text { text: "Threads shown per project"; color: #c9cad0; font-size: 11px; }
+                    SpinBox {
+                        minimum: 1;
+                        maximum: 100;
+                        value: root.visible-thread-limit;
+                        edited => {
+                            root.visible-thread-limit = self.value;
+                            root.show-all-threads = false;
+                            root.set-visible-thread-limit(self.value);
+                        }
+                    }
+                    Text {
+                        text: "Show this many recent threads before offering Show more.";
+                        color: #858790;
+                        font-size: 10px;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: 1px; background: #2b2d33; }
+                    SectionTitle { text: "FILES INSPECTOR"; color: #a995ff; }
+                    Rectangle {
+                        height: 43px;
+                        Text {
+                            x: 0px; y: 0px; height: 18px;
+                            text: "Respect .gitignore";
+                            color: #c9cad0;
+                            font-size: 11px;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                        Text {
+                            x: 0px; y: 20px; width: parent.width - 55px; height: 18px;
+                            text: "Hide files matched by repository ignore rules.";
+                            color: #858790;
+                            font-size: 10px;
+                            overflow: elide;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                        ToggleSwitch {
+                            x: parent.width - self.width;
+                            y: 4px;
+                            checked: root.respect-gitignore;
+                            label: "Respect .gitignore";
+                            toggled(value) => {
+                                root.respect-gitignore = value;
+                                root.set-respect-gitignore(value);
+                            }
+                        }
+                    }
+                    Rectangle { height: 1px; background: #2b2d33; }
+                    SectionTitle { text: "SUMMARIES"; color: #a995ff; }
+                    Text { text: "Summary model"; color: #c9cad0; font-size: 11px; }
+                    ComboBox { model: root.model-names; current-index <=> root.summary-model-index; selected(value) => { root.select-summary-model(value); } }
+                    Text { text: "Summary effort"; color: #c9cad0; font-size: 11px; }
+                    ComboBox { model: root.summary-effort-names; current-index <=> root.summary-effort-index; selected(value) => { root.select-summary-effort(value); } }
+                    Rectangle { height: 1px; background: #2b2d33; }
+                    SectionTitle { text: "CODEX ACCOUNT"; color: #a995ff; }
+                    Text { text: root.account-label == "" ? "Account information unavailable" : root.account-label + (root.plan-label != "" ? " - " + root.plan-label : ""); color: #c9cad0; font-size: 11px; }
+                    Text { text: root.usage-summary; color: #91939b; font-size: 10px; wrap: word-wrap; }
+                    HorizontalLayout {
+                        SmallButton { width: 110px; text: "Refresh usage"; clicked => { root.refresh-usage(); } }
+                        if root.reset-count > 0: SmallButton { width: 120px; text: root.reset-in-progress ? "Resetting..." : "Use reset (" + root.reset-count + ")"; primary: true; enabled: !root.reset-in-progress; clicked => { root.consume-reset(); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ApprovalOverlay inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <bool> session: false;
+    callback answer(string);
+
+    background: #aa000000;
+    Rectangle {
+        width: 560px; height: 350px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        background: #18191d; border-width: 1px; border-color: #4a3f73; border-radius: 13px;
+        VerticalLayout {
+            padding: 20px; spacing: 13px;
+            Text { text: root.title; color: #f1f1f3; font-size: 19px; }
+            ScrollView { vertical-stretch: 1; Text { width: parent.width; text: root.detail; color: #b9bbc2; font-family: "Cascadia Mono"; font-size: 11px; wrap: word-wrap; } }
+            HorizontalLayout {
+                SmallButton { width: 76px; text: "Deny"; danger: true; clicked => { root.answer("decline"); } }
+                Rectangle { horizontal-stretch: 1; }
+                if root.session: SmallButton { width: 126px; text: "Allow session"; clicked => { root.answer("acceptForSession"); } }
+                SmallButton { width: 86px; text: "Allow once"; primary: true; clicked => { root.answer("accept"); } }
+            }
+        }
+    }
+}
+
+export component QuestionsOverlay inherits Rectangle {
+    in property <[QuestionRow]> questions;
+    callback answer-question(int, string);
+    callback submit;
+
+    background: #aa000000;
+    Rectangle {
+        width: 560px; height: 410px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        background: #18191d; border-width: 1px; border-color: #4a3f73; border-radius: 13px;
+        VerticalLayout {
+            padding: 20px; spacing: 12px;
+            Text { text: "Codex needs your input"; color: #f1f1f3; font-size: 19px; }
+            ListView {
+                vertical-stretch: 1;
+                for question in root.questions: Rectangle {
+                    height: question.option-count > 0 ? 166px : 112px;
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text { text: question.header; color: #a995ff; font-size: 11px; }
+                        Text { text: question.question; color: #b9bbc2; font-size: 12px; wrap: word-wrap; }
+                        if question.option-count > 0: HorizontalLayout {
+                            height: 34px; spacing: 6px;
+                            SmallButton { horizontal-stretch: 1; text: question.option-a; selected: question.answer == question.option-a; clicked => { root.answer-question(question.index, question.option-a); } }
+                            if question.option-count > 1: SmallButton { horizontal-stretch: 1; text: question.option-b; selected: question.answer == question.option-b; clicked => { root.answer-question(question.index, question.option-b); } }
+                            if question.option-count > 2: SmallButton { horizontal-stretch: 1; text: question.option-c; selected: question.answer == question.option-c; clicked => { root.answer-question(question.index, question.option-c); } }
+                        }
+                        LineEdit {
+                            placeholder-text: question.option-count > 0 ? "Or type another answer" : "Type an answer";
+                            input-type: question.secret ? password : text;
+                            text: question.answer;
+                            edited(text) => { root.answer-question(question.index, text); }
+                        }
+                    }
+                }
+            }
+            HorizontalLayout { Rectangle { horizontal-stretch: 1; } SmallButton { width: 92px; text: "Continue"; primary: true; clicked => { root.submit(); } } }
+        }
+    }
+}
+
+export component ToastOverlay inherits Rectangle {
+    in property <string> message;
+    in property <bool> error: false;
+
+    height: 42px;
+    clip: true;
+    border-radius: 8px;
+    background: root.error ? #4a2229 : #1f3b31;
+    border-width: 1px; border-color: root.error ? #f26270 : #4ccd91;
+    Text { x: 13px; width: parent.width - 26px; height: parent.height; text: root.message; color: #f2f2f4; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+}
+
+export component LoadingOverlay inherits Rectangle {
+    background: #0d0e10;
+
+    VerticalLayout {
+        width: 180px;
+        height: 72px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        alignment: center;
+        spacing: 14px;
+
+        Rectangle {
+            height: 24px;
+            background: transparent;
+            Spinner {
+                width: 24px;
+                height: 24px;
+                x: (parent.width - self.width) / 2;
+            }
+        }
+        Text {
+            text: "Waiting on codex.";
+            color: #c8c9ce;
+            font-size: 12px;
+            horizontal-alignment: TextHorizontalAlignment.center;
+        }
+    }
+}

@@ -1,0 +1,205 @@
+import { ListView } from "std-widgets.slint";
+import { ChangeRow, FileRow } from "types.slint";
+import { CloseMark, RefreshMark } from "icons.slint";
+import {
+    ChangeFileRow, ChangeMetric, FileTreeNode, InspectorTab, SectionTitle,
+} from "controls.slint";
+
+export component InspectorPanel inherits Rectangle {
+    in property <[FileRow]> files;
+    in property <[ChangeRow]> changes;
+    in property <[string]> activity;
+    in property <string> workspace-path: "";
+    in property <string> workspace-name: "Workspace";
+    in property <int> change-count: 0;
+    in property <int> staged-change-count: 0;
+    in property <int> unstaged-change-count: 0;
+    in-out property <int> selected-tab: 0;
+    callback close;
+    callback refresh-workspace;
+
+    width: 288px;
+    background: #0f1012;
+    border-width: 1px; border-color: #292a2f;
+
+    VerticalLayout {
+        padding: 12px; spacing: 9px;
+        HorizontalLayout {
+            SectionTitle { text: "INSPECTOR"; }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: 28px; height: 28px; border-radius: 5px;
+                background: inspector-close.has-hover ? #34353a : transparent;
+                CloseMark { x: 8px; y: 8px; }
+                inspector-close := TouchArea { mouse-cursor: pointer; clicked => { root.close(); } }
+            }
+        }
+        Rectangle { height: 1px; background: #292a2f; }
+        HorizontalLayout {
+            spacing: 3px;
+            InspectorTab { text: "Workspace"; selected: root.selected-tab == 0; clicked => { root.selected-tab = 0; } }
+            InspectorTab { text: "Changes"; selected: root.selected-tab == 1; clicked => { root.selected-tab = 1; } }
+            InspectorTab { text: "Files"; selected: root.selected-tab == 2; clicked => { root.selected-tab = 2; } }
+            InspectorTab { text: "Activity"; selected: root.selected-tab == 3; clicked => { root.selected-tab = 3; } }
+        }
+        if root.selected-tab == 0: Rectangle {
+            vertical-stretch: 1;
+            Text { width: parent.width; text: root.workspace-path; color: #858790; font-size: 9px; wrap: word-wrap; }
+        }
+        if root.selected-tab == 1: Rectangle {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 9px;
+                Rectangle {
+                    height: 101px;
+                    border-radius: 8px;
+                    background: #141519;
+                    border-width: 1px;
+                    border-color: #292b31;
+                    VerticalLayout {
+                        padding: 9px;
+                        spacing: 8px;
+                        HorizontalLayout {
+                            height: 26px;
+                            spacing: 8px;
+                            Rectangle {
+                                width: 8px; height: 8px;
+                                border-radius: 4px;
+                                background: root.change-count == 0 ? #4eaf7d : #9178e8;
+                            }
+                            VerticalLayout {
+                                spacing: 0px;
+                                Text {
+                                    height: 14px;
+                                    text: "Working tree";
+                                    color: #e3e4e8;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                }
+                                Text {
+                                    height: 12px;
+                                    text: root.change-count == 0 ? "No pending changes"
+                                        : root.change-count == 1 ? "1 file changed"
+                                        : root.change-count + " files changed";
+                                    color: #7d7f88;
+                                    font-size: 8px;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Rectangle {
+                                width: 26px; height: 26px;
+                                border-radius: 5px;
+                                background: refresh-changes.has-hover ? #292a30 : transparent;
+                                accessible-role: button;
+                                accessible-label: "Refresh workspace changes";
+                                RefreshMark { x: 6px; y: 6px; }
+                                refresh-changes := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.refresh-workspace(); }
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            height: 47px;
+                            spacing: 6px;
+                            ChangeMetric { value: root.change-count; label: "TOTAL"; }
+                            ChangeMetric { value: root.staged-change-count; label: "STAGED"; }
+                            ChangeMetric { value: root.unstaged-change-count; label: "UNSTAGED"; }
+                        }
+                    }
+                }
+                if root.change-count > 0: HorizontalLayout {
+                    height: 17px;
+                    Text {
+                        text: "CHANGED FILES";
+                        color: #777982;
+                        font-size: 8px;
+                        font-weight: 600;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.change-count;
+                        color: #777982;
+                        font-size: 8px;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                }
+                if root.change-count > 0: ListView {
+                    vertical-stretch: 1;
+                    for change in root.changes: ChangeFileRow { change: change; }
+                }
+                if root.change-count == 0: Rectangle {
+                    vertical-stretch: 1;
+                    Rectangle {
+                        x: (parent.width - 42px) / 2;
+                        y: max(36px, (parent.height - 104px) / 2);
+                        width: 42px; height: 42px;
+                        border-radius: 21px;
+                        background: #17251f;
+                        border-width: 1px;
+                        border-color: #294b3b;
+                        Path {
+                            x: 12px; y: 12px; width: 18px; height: 18px;
+                            commands: "M 2 9 L 7 14 L 16 4";
+                            viewbox-width: 18; viewbox-height: 18;
+                            fill: transparent; stroke: #6bc997; stroke-width: 2px;
+                            stroke-line-cap: round; stroke-line-join: round;
+                        }
+                    }
+                    Text {
+                        x: 0px; y: max(84px, (parent.height - 8px) / 2);
+                        width: parent.width; height: 20px;
+                        text: "Everything is up to date";
+                        color: #b8bac1;
+                        font-size: 10px;
+                        font-weight: 600;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                    }
+                    Text {
+                        x: 16px; y: max(105px, (parent.height + 34px) / 2);
+                        width: parent.width - 32px; height: 30px;
+                        text: "Edited and untracked files will appear here.";
+                        color: #73757d;
+                        font-size: 8px;
+                        wrap: word-wrap;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                    }
+                }
+            }
+        }
+        if root.selected-tab == 2: Rectangle {
+            vertical-stretch: 1;
+            root-node-label := Text {
+                x: 1px; y: 0px;
+                width: parent.width - 2px;
+                height: 22px;
+                text: root.workspace-name;
+                color: #eeeaff;
+                font-size: 10px;
+                font-weight: 600;
+                overflow: elide;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+            if root.files.length > 0: Rectangle {
+                x: 8px;
+                y: 19px; width: 1px; height: 8px; background: #50525a;
+            }
+            ListView {
+                x: 1px; y: 26px;
+                width: parent.width - 2px;
+                height: parent.height - 26px;
+                for file in root.files: FileTreeNode {
+                    node: file;
+                    tree-origin: 7px;
+                }
+            }
+        }
+        if root.selected-tab == 3: ListView {
+            vertical-stretch: 1;
+            for entry in root.activity: Text { height: 21px; text: entry; color: #7d7f87; font-size: 9px; overflow: elide; }
+        }
+    }
+}

@@ -1,0 +1,62 @@
+import { BrandMark } from "icons.slint";
+import { SmallButton } from "controls.slint";
+
+export component AppHeader inherits Rectangle {
+    in property <string> usage-left-label: "";
+    in property <bool> connected: false;
+    in property <string> connection-text: "Starting Codex...";
+
+    height: 47px;
+    background: #0f1012;
+    border-width: 1px;
+    border-color: #292a2f;
+    HorizontalLayout {
+        padding-left: 11px; padding-right: 17px; spacing: 9px;
+        BrandMark { y: (parent.height - self.height) / 2; }
+        Text { text: "CodeAgent"; color: #f1f1f3; font-size: 14px; vertical-alignment: TextVerticalAlignment.center; }
+        Rectangle { horizontal-stretch: 1; }
+        if root.usage-left-label != "": Rectangle {
+            width: usage-text.preferred-width + 18px; height: 19px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 10px; background: #38393e;
+            usage-text := Text { text: root.usage-left-label; color: #f0f0f2; font-size: 11px; horizontal-alignment: TextHorizontalAlignment.center; vertical-alignment: TextVerticalAlignment.center; }
+        }
+        Rectangle { y: (parent.height - self.height) / 2; width: 8px; height: 8px; border-radius: 4px; background: root.connected ? #55d49a : #d6a54b; }
+        Text { text: root.connection-text; color: #a0a2aa; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; }
+    }
+}
+
+export component UpdateBanner inherits Rectangle {
+    in property <string> version;
+    in property <bool> in-progress: false;
+    callback update;
+
+    height: 48px;
+    background: #201a35;
+    border-width: 1px;
+    border-color: #493b76;
+    HorizontalLayout {
+        padding-left: 18px; padding-right: 18px; spacing: 12px;
+        Text {
+            text: "Codex " + root.version + " is available";
+            color: #e3ddfb;
+            font-size: 12px;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+        Text {
+            text: "Update now, then restart CodeAgent to use the new version.";
+            color: #9e95bb;
+            font-size: 11px;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+        Rectangle { horizontal-stretch: 1; }
+        SmallButton {
+            width: 116px;
+            y: (parent.height - self.height) / 2;
+            text: root.in-progress ? "Updating..." : "Update Codex";
+            primary: true;
+            enabled: !root.in-progress;
+            clicked => { root.update(); }
+        }
+    }
+}

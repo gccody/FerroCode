@@ -1,0 +1,265 @@
+import { ListView, ScrollView } from "std-widgets.slint";
+import { AttachmentRow, MessageRow } from "types.slint";
+import { BrandMark, InspectorMark, SendMark, StopMark } from "icons.slint";
+import {
+    AttachmentPreview, ComposerAttachButton, ComposerComboBox, ComposerEdit, ContextIndicator,
+} from "controls.slint";
+import { MessageCard } from "message-card.slint";
+
+export component ConversationPane inherits Rectangle {
+    in property <[MessageRow]> messages;
+    in property <int> message-revision: 0;
+    in property <[AttachmentRow]> attachments;
+    in property <string> workspace-path: "";
+    in property <string> workspace-name: "Workspace";
+    in property <string> active-thread-id: "";
+    in property <string> active-thread-title: "New thread";
+    in property <string> context-label: "";
+    in property <string> context-progress-path: "";
+    in property <int> context-percent: 0;
+    in property <bool> connected: false;
+    in property <bool> busy: false;
+    in property <bool> has-project: false;
+    in-out property <bool> inspector-visible: false;
+    in property <[string]> model-names;
+    in property <[string]> effort-names;
+    in property <[string]> sandbox-names;
+    in-out property <int> selected-model-index: 0;
+    in-out property <int> selected-effort-index: 0;
+    in-out property <int> selected-sandbox-index: 1;
+
+    callback send-message(string);
+    callback stop-turn;
+    callback attach-files;
+    callback paste-image() -> bool;
+    callback remove-attachment(int);
+    callback copy-code(string);
+    callback select-model(string);
+    callback select-effort(string);
+    callback select-sandbox(string);
+
+    horizontal-stretch: 1;
+    background: #0d0e10;
+
+    changed active-thread-id => {
+        root.follow-latest = root.active-thread-id != "";
+        // ListView discovers variable-height delegates lazily. A few event-loop
+        // passes let its estimated viewport height settle before the final seek.
+        root.scroll-latest-attempts = root.active-thread-id == "" ? 0 : 3;
+    }
+    private property <int> message-count: root.messages.length;
+    changed message-count => {
+        if root.active-thread-id != ""
+            && root.message-count > 0
+            && root.messages[root.message-count - 1].user {
+            // Sending a new prompt always starts a fresh follow cycle.
+            root.follow-latest = true;
+            root.scroll-latest-attempts = 3;
+        }
+    }
+    changed message-revision => {
+        if root.active-thread-id != "" && root.follow-latest {
+            root.scroll-latest-attempts = 3;
+        }
+    }
+
+    private property <bool> follow-latest: true;
+    private property <int> scroll-latest-attempts: 0;
+    private property <bool> user-scroll-pending: false;
+    private property <length> user-scroll-origin-y: 0px;
+    scroll-latest-timer := Timer {
+        interval: 1ms;
+        running: root.scroll-latest-attempts > 0;
+        triggered => {
+            conversation.viewport-y = min(
+                0px,
+                conversation.visible-height - conversation.viewport-height
+            );
+            root.scroll-latest-attempts -= 1;
+        }
+    }
+    user-scroll-settle-timer := Timer {
+        interval: 250ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.user-scroll-pending = false;
+            // Mouse-wheel scrolling is animated for 180 ms. Test the final
+            // position only after that animation and ListView measurement settle.
+            if root.active-thread-id != ""
+                && conversation.viewport-y <= root.user-scroll-origin-y + 1px
+                && conversation.viewport-y <= min(
+                    0px,
+                    conversation.visible-height - conversation.viewport-height
+                ) + 64px {
+                root.follow-latest = true;
+                root.scroll-latest-attempts = 3;
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            height: 57px;
+            background: #0d0e10;
+            border-width: 1px;
+            border-color: #292a2f;
+            HorizontalLayout {
+                padding-left: 20px; padding-right: 17px; spacing: 8px;
+                HorizontalLayout {
+                    spacing: 0px;
+                    Text {
+                        text: root.active-thread-id == "" ? "" : root.workspace-name + " / ";
+                        color: #9a9ca4;
+                        font-size: 15px;
+                        vertical-alignment: TextVerticalAlignment.center;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.active-thread-title;
+                        color: #f3f3f5;
+                        font-size: 15px;
+                        font-weight: 600;
+                        vertical-alignment: TextVerticalAlignment.center;
+                        overflow: elide;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: root.workspace-path; color: #8d8f97; font-size: 10px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                Rectangle {
+                    width: 32px; height: 30px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 7px;
+                    background: root.inspector-visible ? #2c2740 : inspector-touch.has-hover ? #24252a : #191a1e;
+                    border-width: 1px;
+                    border-color: root.inspector-visible ? #5b4b8d : #34363d;
+                    accessible-role: button;
+                    accessible-label: root.inspector-visible ? "Hide inspector" : "Show inspector";
+                    InspectorMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                    inspector-touch := TouchArea { mouse-cursor: pointer; clicked => { root.inspector-visible = !root.inspector-visible; } }
+                }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: #0d0e10;
+            if root.messages.length == 0: VerticalLayout {
+                padding-left: 80px; padding-right: 80px;
+                alignment: LayoutAlignment.center; spacing: 10px;
+                HorizontalLayout {
+                    height: 34px;
+                    horizontal-stretch: 1;
+                    alignment: LayoutAlignment.center;
+                    BrandMark { width: 34px; height: 34px; border-radius: 17px; }
+                }
+                Text { text: "What should we build?"; color: #ededf0; font-size: 22px; horizontal-alignment: TextHorizontalAlignment.center; }
+                Text { text: root.has-project ? "Ask CodeAgent to work in this project" : "Add a project folder to start"; color: #858790; font-size: 12px; horizontal-alignment: TextHorizontalAlignment.center; }
+            }
+            Rectangle {
+                visible: root.messages.length > 0;
+                conversation := ListView {
+                    x: max(16px, (parent.width - 850px) / 2);
+                    width: min(parent.width - 32px, 850px);
+                    height: parent.height;
+                    vertical-scrollbar-policy: as-needed;
+                    horizontal-scrollbar-policy: always-off;
+                    scrolled => {
+                        // This callback is emitted by user input, but for a mouse
+                        // wheel it fires before the smooth-scroll animation runs.
+                        if !root.user-scroll-pending {
+                            root.user-scroll-origin-y = conversation.viewport-y;
+                            root.user-scroll-pending = true;
+                        }
+                        root.follow-latest = false;
+                        root.scroll-latest-attempts = 0;
+                        user-scroll-settle-timer.stop();
+                        user-scroll-settle-timer.start();
+                    }
+                    for message in root.messages: MessageCard {
+                        message: message;
+                        copy-code(text) => { root.copy-code(text); }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: root.attachments.length > 0 ? 210px : 132px;
+            background: #0d0e10;
+            border-width: 1px;
+            border-color: #292a2f;
+            composer-shell := Rectangle {
+                width: min(parent.width - 38px, 820px);
+                height: root.attachments.length > 0 ? 194px : 116px;
+                x: (parent.width - self.width) / 2;
+                y: 8px;
+                background: #17181d;
+                border-width: 1px;
+                border-color: #303138;
+                border-radius: 14px;
+                composer := ComposerEdit {
+                    x: 13px; y: 10px; width: parent.width - 26px; height: 59px;
+                    enabled: root.connected && root.has-project && !root.busy;
+                    placeholder-text: !root.has-project ? "Add a project folder before starting a thread" : root.connected ? "Ask for a follow-up or describe a task" : "Waiting for Codex CLI...";
+                    key-pressed(event) => {
+                        if event.modifiers.control && (event.text == "v" || event.text == "V") {
+                            if root.paste-image() { return accept; }
+                            return reject;
+                        }
+                        if event.text == "\n" && !event.modifiers.shift {
+                            if composer.text != "" { root.send-message(composer.text); composer.text = ""; }
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+                if root.attachments.length > 0: ScrollView {
+                    x: 12px; y: 72px; width: parent.width - 24px; height: 74px;
+                    horizontal-scrollbar-policy: as-needed;
+                    vertical-scrollbar-policy: always-off;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        for attachment in root.attachments: AttachmentPreview {
+                            attachment: attachment;
+                            remove(index) => { root.remove-attachment(index); }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    x: 12px; y: root.attachments.length > 0 ? 153px : 75px; width: parent.width - 24px; height: 34px; spacing: 7px;
+                    ComposerAttachButton {
+                        enabled: root.has-project;
+                        clicked => { root.attach-files(); }
+                    }
+                    ComposerComboBox { width: 136px; model: root.model-names; current-index <=> root.selected-model-index; selected(value) => { root.select-model(value); } }
+                    ComposerComboBox { width: 99px; model: root.effort-names; current-index <=> root.selected-effort-index; selected(value) => { root.select-effort(value); } }
+                    ComposerComboBox { width: 98px; model: root.sandbox-names; current-index <=> root.selected-sandbox-index; selected(value) => { root.select-sandbox(value); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    ContextIndicator {
+                        y: (parent.height - self.height) / 2;
+                        label: root.context-label;
+                        percent: root.context-percent;
+                        progress-path: root.context-progress-path;
+                    }
+                    if root.busy: Rectangle {
+                        width: 31px; height: 31px; border-radius: 16px;
+                        background: stop-touch.has-hover ? #dc5965 : #c94855;
+                        accessible-role: button;
+                        accessible-label: "Stop";
+                        StopMark { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                        stop-touch := TouchArea { mouse-cursor: pointer; clicked => { root.stop-turn(); } }
+                    }
+                    if !root.busy: Rectangle {
+                        width: 31px; height: 31px; border-radius: 16px;
+                        background: send-touch.has-hover ? #765dcc : #654db9;
+                        SendMark { x: (parent.width - self.width) / 2 + 0.5px; y: (parent.height - self.height) / 2; }
+                        send-touch := TouchArea { enabled: root.connected && root.has-project; mouse-cursor: pointer; clicked => { if composer.text != "" { root.send-message(composer.text); composer.text = ""; } } }
+                    }
+                }
+            }
+        }
+    }
+}
