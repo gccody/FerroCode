@@ -1,0 +1,38 @@
+export struct ProjectRow {
+    id: string, name: string, path: string, active: bool, collapsed: bool, thread-count: int
+}
+
+export struct ThreadRow {
+    id: string, project-id: string, title: string, subtitle: string,
+    active: bool, busy: bool, completed-unread: bool, project-index: int
+}
+
+export struct MarkdownTableCell { text: styled-text, alignment: string, column-width: length }
+export struct MarkdownTableRow { cells: [MarkdownTableCell], header: bool, row-height: length }
+
+export struct MarkdownBlock {
+    kind: string, text: styled-text, raw-text: string, language: string, level: int,
+    block-height: length, column-count: int, table-width: length, table-height: length,
+    table-rows: [MarkdownTableRow]
+}
+
+export struct MessageRow {
+    id: string, kind: string, title: string, body: string, markdown-blocks: [MarkdownBlock], status: string,
+    user: bool, activity: bool, row-height: length
+}
+
+export struct FileRow {
+    name: string, depth: int, directory: bool, changed: bool, connector-height: int,
+    guide0: bool, guide1: bool, guide2: bool, guide3: bool, guide4: bool, guide5: bool
+}
+
+export struct ChangeRow {
+    name: string, detail: string, status: string, status-label: string, state-label: string
+}
+
+export struct QuestionRow {
+    index: int, header: string, question: string, answer: string, secret: bool,
+    option-count: int, option-a: string, option-b: string, option-c: string
+}
+
+export struct AttachmentRow { index: int, name: string, preview: image, image: bool }

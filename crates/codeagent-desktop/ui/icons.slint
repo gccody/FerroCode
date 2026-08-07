@@ -1,0 +1,146 @@
+export component BrandMark inherits Rectangle {
+    width: 18px; height: 18px;
+    border-radius: 9px;
+    border-width: 2px;
+    border-color: #7658db;
+    Rectangle { width: 5px; height: 5px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 3px; background: #a893ff; }
+}
+
+export component CompletedMark inherits Rectangle {
+    width: 14px; height: 14px;
+    border-radius: 7px;
+    background: #3f9f72;
+    Path {
+        x: 3px; y: 3px; width: 8px; height: 8px;
+        commands: "M 1 4 L 3.2 6.2 L 7 1.8";
+        viewbox-width: 8; viewbox-height: 8;
+        fill: transparent; stroke: #ffffff; stroke-width: 1.5px;
+        stroke-line-cap: round; stroke-line-join: round;
+    }
+}
+
+// The native Spinner can become effectively invisible with the dark Skia
+// palette, so sidebar activity uses an explicit high-contrast status badge.
+export component WorkingMark inherits Rectangle {
+    width: 16px; height: 16px;
+    border-radius: 8px;
+    background: #392d63;
+    border-width: 1px;
+    border-color: #a893ff;
+    Rectangle {
+        x: 4px; y: 4px; width: 8px; height: 8px;
+        border-radius: 4px;
+        background: #c7baff;
+    }
+}
+
+export component PlusMark inherits Path {
+    width: 14px; height: 14px;
+    commands: "M 7 1 L 7 13 M 1 7 L 13 7";
+    viewbox-width: 14; viewbox-height: 14;
+    fill: transparent; stroke: #aeb0b8; stroke-width: 1.8px;
+    stroke-line-cap: round;
+}
+
+export component CopyMark inherits Path {
+    width: 14px; height: 14px;
+    commands: "M 9 9 H 22 V 22 H 9 Z M 5 15 H 2 V 2 H 15 V 5";
+    viewbox-width: 24; viewbox-height: 24;
+    fill: transparent; stroke: #aeb0b8; stroke-width: 2px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component ChevronDown inherits Path {
+    width: 12px; height: 8px;
+    commands: "M 1 1 L 6 6.5 L 11 1";
+    viewbox-width: 12; viewbox-height: 8;
+    fill: transparent; stroke: #a7a9b0; stroke-width: 1.7px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component ChevronRight inherits Path {
+    width: 8px; height: 12px;
+    commands: "M 1 1 L 6.5 6 L 1 11";
+    viewbox-width: 8; viewbox-height: 12;
+    fill: transparent; stroke: #a7a9b0; stroke-width: 1.7px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component CloseMark inherits Path {
+    width: 12px; height: 12px;
+    commands: "M 1.5 1.5 L 10.5 10.5 M 10.5 1.5 L 1.5 10.5";
+    viewbox-width: 12; viewbox-height: 12;
+    fill: transparent; stroke: #b7b8bd; stroke-width: 1.7px; stroke-line-cap: round;
+}
+
+export component NewChatMark inherits Path {
+    width: 16px; height: 16px;
+    commands: "M 2 2.5 H 14 V 11 H 7 L 3.5 14 V 11 H 2 Z M 8 4.5 V 9 M 5.75 6.75 H 10.25";
+    viewbox-width: 16; viewbox-height: 16;
+    fill: transparent; stroke: #aeb0b8; stroke-width: 1.5px; stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component SettingsCog inherits Path {
+    width: 16px; height: 16px;
+    commands: "M 6.1 1 L 9.9 1 L 10.3 2.8 C 10.8 3 11.2 3.2 11.6 3.5 L 13.3 3 L 15 6 L 13.7 7.2 C 13.8 7.7 13.8 8.3 13.7 8.8 L 15 10 L 13.3 13 L 11.6 12.5 C 11.2 12.8 10.8 13 10.3 13.2 L 9.9 15 L 6.1 15 L 5.7 13.2 C 5.2 13 4.8 12.8 4.4 12.5 L 2.7 13 L 1 10 L 2.3 8.8 C 2.2 8.3 2.2 7.7 2.3 7.2 L 1 6 L 2.7 3 L 4.4 3.5 C 4.8 3.2 5.2 3 5.7 2.8 Z M 10.2 8 A 2.2 2.2 0 1 1 5.8 8 A 2.2 2.2 0 1 1 10.2 8";
+    viewbox-width: 16; viewbox-height: 16;
+    fill: transparent; stroke: #a2a4ac; stroke-width: 1.6px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component PaperclipMark inherits Path {
+    width: 17px; height: 17px;
+    commands: "M 21.44 11.05 L 12.25 20.24 C 9.91 22.58 6.11 22.58 3.76 20.24 C 1.42 17.90 1.42 14.10 3.76 11.76 L 12.95 2.57 C 14.51 1.01 17.05 1.01 18.61 2.57 C 20.17 4.13 20.17 6.67 18.61 8.23 L 9.41 17.42 C 8.63 18.20 7.37 18.20 6.59 17.42 C 5.81 16.64 5.81 15.38 6.59 14.59 L 15.07 6.11";
+    viewbox-width: 24; viewbox-height: 24;
+    fill: transparent; stroke: #c3c5cc; stroke-width: 1.2px; stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component ComposerChevron inherits Path {
+    width: 12px;
+    height: 7px;
+    commands: "M 1 1 L 6 6 L 11 1";
+    viewbox-width: 12;
+    viewbox-height: 7;
+    fill: transparent;
+    stroke: #aeb0b8;
+    stroke-width: 1.2px;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+}
+
+export component SendMark inherits Path {
+    width: 14px; height: 15px;
+    commands: "M 6 11 L 6 2 M 2 6 L 6 2 L 10 6";
+    viewbox-width: 12; viewbox-height: 13;
+    fill: transparent; stroke: #e3def8; stroke-width: 1.8px; stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component StopMark inherits Rectangle {
+    width: 8px; height: 8px;
+    border-radius: 1px;
+    background: #fff2f3;
+}
+
+export component InspectorMark inherits Path {
+    width: 16px; height: 14px;
+    commands: "M 1 1 L 13 1 L 13 11 L 1 11 Z M 9 1 L 9 11";
+    viewbox-width: 14; viewbox-height: 12;
+    fill: transparent; stroke: #aaa4c4; stroke-width: 1.65px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component RefreshMark inherits Path {
+    width: 14px; height: 14px;
+    commands: "M 11.5 4.5 A 5 5 0 1 0 11.4 10 M 11.5 1.5 L 11.5 4.5 L 8.5 4.5";
+    viewbox-width: 14; viewbox-height: 14;
+    fill: transparent; stroke: #aaa4c4; stroke-width: 1.4px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
+export component SidebarMark inherits Path {
+    width: 16px; height: 14px;
+    commands: "M 1 1 L 15 1 L 15 13 L 1 13 Z M 5 1 L 5 13";
+    viewbox-width: 16; viewbox-height: 14;
+    fill: transparent; stroke: #aaa4c4; stroke-width: 1.65px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
