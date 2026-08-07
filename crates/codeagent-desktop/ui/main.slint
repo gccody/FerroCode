@@ -821,6 +821,10 @@ export component MainWindow inherits Window {
     callback set-respect-gitignore(bool);
     callback set-visible-thread-limit(int);
 
+    public function clear-input-focus() {
+        focus-sink.focus();
+    }
+
     changed inspector-visible => { root.set-inspector(root.inspector-visible); }
     changed active-thread-id => {
         root.follow-latest = root.active-thread-id != "";
@@ -877,6 +881,15 @@ export component MainWindow inherits Window {
                 root.scroll-latest-attempts = 3;
             }
         }
+    }
+
+    // Pointer presses move focus here before normal dispatch. An input that was
+    // clicked will then take focus back; clicking anywhere else leaves it here.
+    focus-sink := FocusScope {
+        width: 0px;
+        height: 0px;
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
     }
 
     VerticalLayout {
