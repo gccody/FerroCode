@@ -9,7 +9,6 @@ export component InspectorPanel inherits Rectangle {
     in property <[FileRow]> files;
     in property <[ChangeRow]> changes;
     in property <[string]> activity;
-    in property <string> workspace-path: "";
     in property <string> workspace-name: "Workspace";
     in property <int> change-count: 0;
     in property <int> staged-change-count: 0;
@@ -37,16 +36,11 @@ export component InspectorPanel inherits Rectangle {
         Rectangle { height: 1px; background: #292a2f; }
         HorizontalLayout {
             spacing: 3px;
-            InspectorTab { text: "Workspace"; selected: root.selected-tab == 0; clicked => { root.selected-tab = 0; } }
-            InspectorTab { text: "Changes"; selected: root.selected-tab == 1; clicked => { root.selected-tab = 1; } }
-            InspectorTab { text: "Files"; selected: root.selected-tab == 2; clicked => { root.selected-tab = 2; } }
-            InspectorTab { text: "Activity"; selected: root.selected-tab == 3; clicked => { root.selected-tab = 3; } }
+            InspectorTab { text: "Changes"; selected: root.selected-tab == 0; clicked => { root.selected-tab = 0; } }
+            InspectorTab { text: "Files"; selected: root.selected-tab == 1; clicked => { root.selected-tab = 1; } }
+            InspectorTab { text: "Activity"; selected: root.selected-tab == 2; clicked => { root.selected-tab = 2; } }
         }
         if root.selected-tab == 0: Rectangle {
-            vertical-stretch: 1;
-            Text { width: parent.width; text: root.workspace-path; color: #858790; font-size: 9px; wrap: word-wrap; }
-        }
-        if root.selected-tab == 1: Rectangle {
             vertical-stretch: 1;
             VerticalLayout {
                 spacing: 9px;
@@ -170,7 +164,7 @@ export component InspectorPanel inherits Rectangle {
                 }
             }
         }
-        if root.selected-tab == 2: Rectangle {
+        if root.selected-tab == 1: Rectangle {
             vertical-stretch: 1;
             root-node-label := Text {
                 x: 1px; y: 0px;
@@ -197,7 +191,7 @@ export component InspectorPanel inherits Rectangle {
                 }
             }
         }
-        if root.selected-tab == 3: ListView {
+        if root.selected-tab == 2: ListView {
             vertical-stretch: 1;
             for entry in root.activity: Text { height: 21px; text: entry; color: #7d7f87; font-size: 9px; overflow: elide; }
         }
