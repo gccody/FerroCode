@@ -178,22 +178,6 @@ component ToggleSwitch inherits Rectangle {
     }
 }
 
-component FlatButton inherits Rectangle {
-    in property <string> text;
-    in property <bool> plus-icon: false;
-    in property <bool> enabled: true;
-    callback clicked;
-    accessible-role: button;
-    accessible-label: text;
-    accessible-enabled: enabled;
-    height: 36px;
-    border-radius: 6px;
-    background: touch.has-hover && enabled ? #1d1e22 : transparent;
-    if root.plus-icon: PlusMark { x: 10px; y: (parent.height - self.height) / 2; }
-    Text { x: root.plus-icon ? 34px : 9px; width: parent.width - self.x - 8px; text: root.text; color: root.enabled ? #d7d8dc : #73757d; font-size: 13px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
-    touch := TouchArea { enabled: root.enabled; mouse-cursor: root.enabled ? pointer : default; clicked => { root.clicked(); } }
-}
-
 component ComposerEdit inherits Rectangle {
     in-out property <string> text <=> input.text;
     in property <string> placeholder-text;
@@ -956,7 +940,6 @@ export component MainWindow inherits Window {
                     padding-left: 12px; padding-right: 12px; padding-top: 9px; padding-bottom: 7px;
                     spacing: 7px;
 
-                    FlatButton { text: "New chat"; plus-icon: true; enabled: root.has-project; clicked => { root.new-thread(); } }
                     LineEdit { height: 28px; placeholder-text: "Search"; edited(text) => { root.search-threads(text); } }
                     Rectangle { height: 14px; }
                     HorizontalLayout {
