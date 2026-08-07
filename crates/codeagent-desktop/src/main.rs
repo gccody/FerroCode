@@ -709,7 +709,7 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
         state
             .plan_usage
             .as_ref()
-            .and_then(|usage| usage.limits.first())
+            .and_then(|usage| usage.default_limit())
             .and_then(|limit| limit.primary.as_ref())
             .map(|window| {
                 format!(

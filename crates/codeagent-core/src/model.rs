@@ -168,6 +168,7 @@ pub struct AccountInfo {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlanUsage {
     pub limits: Vec<RateLimit>,
+    pub default_limit_id: Option<String>,
     pub available_reset_count: u64,
     pub reset_credits: Option<Vec<ResetCredit>>,
 }
@@ -202,6 +203,11 @@ pub struct ResetCredit {
 
 impl PlanUsage {
     pub fn from_protocol(result: &Value) -> Self {
+        let default_limit = result
+            .get("rateLimits")
+            .filter(|value| !value.is_null())
+            .map(|value| RateLimit::from_protocol("codex", value));
+        let default_limit_id = default_limit.as_ref().map(|limit| limit.id.clone());
         let mut limits = result
             .get("rateLimitsByLimitId")
             .and_then(Value::as_object)
@@ -209,16 +215,12 @@ impl PlanUsage {
             .flatten()
             .map(|(id, value)| RateLimit::from_protocol(id, value))
             .collect::<Vec<_>>();
-        limits.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
-        if limits.is_empty()
-            && let Some(value) = result.get("rateLimits").filter(|value| !value.is_null())
+        if let Some(default_limit) = default_limit
+            && !limits.iter().any(|limit| limit.id == default_limit.id)
         {
-            let id = value
-                .get("limitId")
-                .and_then(Value::as_str)
-                .unwrap_or("codex");
-            limits.push(RateLimit::from_protocol(id, value));
+            limits.push(default_limit);
         }
+        limits.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
 
         let reset_summary = result.get("rateLimitResetCredits").filter(|v| !v.is_null());
         let available_reset_count = reset_summary
@@ -237,9 +239,18 @@ impl PlanUsage {
             });
         Self {
             limits,
+            default_limit_id,
             available_reset_count,
             reset_credits,
         }
+    }
+
+    pub fn default_limit(&self) -> Option<&RateLimit> {
+        self.default_limit_id
+            .as_ref()
+            .and_then(|id| self.limits.iter().find(|limit| &limit.id == id))
+            .or_else(|| self.limits.iter().find(|limit| limit.id == "codex"))
+            .or_else(|| self.limits.first())
     }
 }
 
@@ -540,6 +551,39 @@ mod tests {
         assert_eq!(usage.limits[1].primary.as_ref().unwrap().used_percent, 100);
         assert_eq!(usage.available_reset_count, 3);
         assert!(usage.reset_credits.is_none());
+    }
+
+    #[test]
+    fn selects_canonical_subscription_limit_over_alphabetically_first_bucket() {
+        let usage = PlanUsage::from_protocol(&serde_json::json!({
+            "rateLimits": {
+                "limitId": "codex",
+                "primary": {"usedPercent": 3}
+            },
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "limitId": "codex",
+                    "primary": {"usedPercent": 3}
+                },
+                "codex_bengalfox": {
+                    "limitId": "codex_bengalfox",
+                    "limitName": "GPT-5.3-Codex-Spark",
+                    "primary": {"usedPercent": 0}
+                }
+            }
+        }));
+
+        assert_eq!(usage.limits[0].id, "codex_bengalfox");
+        assert_eq!(
+            usage
+                .default_limit()
+                .unwrap()
+                .primary
+                .as_ref()
+                .unwrap()
+                .used_percent,
+            3
+        );
     }
 
     #[test]
