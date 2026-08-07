@@ -537,6 +537,22 @@ fn wire_callbacks(
             sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
         }
     });
+
+    let weak = ui.as_weak();
+    let controller_ref = controller.clone();
+    let search_ref = search.clone();
+    ui.on_set_visible_thread_limit(move |limit| {
+        let limit = limit.clamp(1, 100) as u32;
+        let mut controller = controller_ref.borrow_mut();
+        if controller.state.prefs.visible_thread_limit != limit {
+            controller.state.prefs.visible_thread_limit = limit;
+            controller.state.touch();
+        }
+        drop(controller);
+        if let Some(ui) = weak.upgrade() {
+            sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
+        }
+    });
 }
 
 fn callback_with_string<F, R>(
@@ -630,6 +646,7 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     ui.set_plan_label(state.account.plan.clone().into());
     ui.set_workspace_path(short_path(&state.prefs.workspace, 54).into());
     ui.set_respect_gitignore(state.prefs.respect_gitignore);
+    ui.set_visible_thread_limit(state.prefs.visible_thread_limit.clamp(1, 100) as i32);
     ui.set_workspace_name(
         state
             .active_project
@@ -651,6 +668,14 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     ui.set_codex_update_in_progress(state.codex_update_in_progress);
     ui.set_inspector_visible(state.prefs.show_inspector || ui.get_inspector_visible());
 
+    let threads = thread_rows(state, search);
+    let mut thread_counts = BTreeMap::<String, i32>::new();
+    for thread in &threads {
+        *thread_counts
+            .entry(thread.project_id.to_string())
+            .or_default() += 1;
+    }
+
     let projects = state
         .projects
         .iter()
@@ -660,13 +685,13 @@ fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
             path: project.path.clone().into(),
             active: state.active_project.as_deref() == Some(&project.id),
             collapsed: project.collapsed,
+            thread_count: thread_counts.get(&project.id).copied().unwrap_or_default(),
         })
         .collect::<Vec<_>>();
     if !project_rows_match(&ui.get_projects(), &projects) {
         ui.set_projects(model(projects));
     }
 
-    let threads = thread_rows(state, search);
     if !thread_rows_match(&ui.get_threads(), &threads) {
         ui.set_threads(model(threads));
     }
@@ -940,21 +965,28 @@ fn thread_rows(state: &AppState, search: &str) -> Vec<ThreadRow> {
         .filter(|thread| search.is_empty() || thread.title.to_lowercase().contains(&search))
         .collect::<Vec<_>>();
     threads.sort_by_key(|thread| std::cmp::Reverse(thread.updated_at));
+    let mut project_indexes = BTreeMap::<&str, i32>::new();
     threads
         .into_iter()
-        .map(|thread| ThreadRow {
-            id: thread.id.clone().into(),
-            project_id: thread.project_id.clone().into(),
-            title: thread.title.clone().into(),
-            subtitle: format!(
-                "{} message{}",
-                thread.messages.len(),
-                if thread.messages.len() == 1 { "" } else { "s" }
-            )
-            .into(),
-            active: state.active_local_thread.as_deref() == Some(&thread.id),
-            busy: state.running_turns.contains_key(&thread.id),
-            completed_unread: thread.unread_completion,
+        .map(|thread| {
+            let project_index = project_indexes.entry(&thread.project_id).or_default();
+            let row = ThreadRow {
+                id: thread.id.clone().into(),
+                project_id: thread.project_id.clone().into(),
+                title: thread.title.clone().into(),
+                subtitle: format!(
+                    "{} message{}",
+                    thread.messages.len(),
+                    if thread.messages.len() == 1 { "" } else { "s" }
+                )
+                .into(),
+                active: state.active_local_thread.as_deref() == Some(&thread.id),
+                busy: state.running_turns.contains_key(&thread.id),
+                completed_unread: thread.unread_completion,
+                project_index: *project_index,
+            };
+            *project_index += 1;
+            row
         })
         .collect()
 }
@@ -968,6 +1000,7 @@ fn project_rows_match(current: &ModelRc<ProjectRow>, next: &[ProjectRow]) -> boo
                     && current.path == next.path
                     && current.active == next.active
                     && current.collapsed == next.collapsed
+                    && current.thread_count == next.thread_count
             })
         })
 }
@@ -983,6 +1016,7 @@ fn thread_rows_match(current: &ModelRc<ThreadRow>, next: &[ThreadRow]) -> bool {
                     && current.active == next.active
                     && current.busy == next.busy
                     && current.completed_unread == next.completed_unread
+                    && current.project_index == next.project_index
             })
         })
 }
@@ -1887,9 +1921,11 @@ mod tests {
         assert_eq!(rows[0].subtitle.as_str(), "2 messages");
         assert!(rows[0].active);
         assert!(rows[0].busy);
+        assert_eq!(rows[0].project_index, 0);
         assert_eq!(rows[1].project_id.as_str(), first_project);
         assert_eq!(rows[1].subtitle.as_str(), "1 message");
         assert!(rows[1].completed_unread);
+        assert_eq!(rows[1].project_index, 0);
 
         let rendered_rows = model(rows.clone());
         assert!(thread_rows_match(&rendered_rows, &rows));
