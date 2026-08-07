@@ -458,11 +458,11 @@ component CloseMark inherits Path {
     fill: transparent; stroke: #b7b8bd; stroke-width: 1.7px; stroke-line-cap: round;
 }
 
-component ExternalMark inherits Path {
-    width: 14px; height: 14px;
-    commands: "M 6 2.5 L 2.5 2.5 L 2.5 11.5 L 11.5 11.5 L 11.5 8 M 7 7 L 12.5 1.5 M 8.5 1.5 L 12.5 1.5 L 12.5 5.5";
-    viewbox-width: 14; viewbox-height: 14;
-    fill: transparent; stroke: #92949c; stroke-width: 1.65px; stroke-line-cap: round; stroke-line-join: round;
+component NewChatMark inherits Path {
+    width: 16px; height: 16px;
+    commands: "M 2 2.5 H 14 V 11 H 7 L 3.5 14 V 11 H 2 Z M 8 4.5 V 9 M 5.75 6.75 H 10.25";
+    viewbox-width: 16; viewbox-height: 16;
+    fill: transparent; stroke: #aeb0b8; stroke-width: 1.5px; stroke-line-cap: round; stroke-line-join: round;
 }
 
 component SettingsCog inherits Path {
@@ -803,6 +803,7 @@ export component MainWindow inherits Window {
     callback select-project(string);
     callback toggle-project(string);
     callback new-thread;
+    callback new-thread-for-project(string);
     callback open-thread(string);
     callback archive-thread(string);
     callback search-threads(string);
@@ -994,10 +995,25 @@ export component MainWindow inherits Window {
                                         vertical-alignment: TextVerticalAlignment.center;
                                         overflow: elide;
                                     }
-                                    ExternalMark { x: parent.width - 23px; y: 12px; }
                                     project-touch := TouchArea {
                                         mouse-cursor: pointer;
                                         clicked => { root.toggle-project(project.id); }
+                                    }
+                                    Rectangle {
+                                        x: parent.width - 32px; y: 5px;
+                                        width: 28px; height: 28px;
+                                        border-radius: 5px;
+                                        background: new-chat-touch.has-hover ? #34353a : transparent;
+                                        accessible-role: button;
+                                        accessible-label: "New chat in " + project.name;
+                                        NewChatMark {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                        }
+                                        new-chat-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.new-thread-for-project(project.id); }
+                                        }
                                     }
                                 }
                                 for thread in root.threads: Rectangle {

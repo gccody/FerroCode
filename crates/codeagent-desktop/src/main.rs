@@ -115,6 +115,13 @@ fn wire_callbacks(
         MainWindow::on_toggle_project,
         |controller, value| controller.toggle_project(value),
     );
+    callback_with_string(
+        ui,
+        controller,
+        search,
+        MainWindow::on_new_thread_for_project,
+        |controller, value| controller.new_thread_for_project(value),
+    );
     let weak = ui.as_weak();
     let controller_ref = controller.clone();
     let search_ref = search.clone();
