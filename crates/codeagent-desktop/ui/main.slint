@@ -1,9 +1,11 @@
-import { ComboBox, LineEdit, ListView, ScrollView, Spinner } from "std-widgets.slint";
+import { ComboBox, LineEdit, ListView, ScrollView, Spinner, SpinBox } from "std-widgets.slint";
 
-export struct ProjectRow { id: string, name: string, path: string, active: bool, collapsed: bool }
+export struct ProjectRow {
+    id: string, name: string, path: string, active: bool, collapsed: bool, thread-count: int
+}
 export struct ThreadRow {
     id: string, project-id: string, title: string, subtitle: string,
-    active: bool, busy: bool, completed-unread: bool
+    active: bool, busy: bool, completed-unread: bool, project-index: int
 }
 export struct MarkdownTableCell { text: styled-text, alignment: string, column-width: length }
 export struct MarkdownTableRow { cells: [MarkdownTableCell], header: bool, row-height: length }
@@ -759,6 +761,8 @@ export component MainWindow inherits Window {
     in-out property <int> inspector-tab: 0;
     in-out property <bool> settings-visible: false;
     in-out property <bool> respect-gitignore: true;
+    in-out property <int> visible-thread-limit: 5;
+    in-out property <bool> show-all-threads: false;
     in property <string> git-diff: "";
     in-out property <int> selected-model-index: 0;
     in-out property <int> selected-effort-index: 0;
@@ -815,6 +819,7 @@ export component MainWindow inherits Window {
     callback update-codex;
     callback set-inspector(bool);
     callback set-respect-gitignore(bool);
+    callback set-visible-thread-limit(int);
 
     changed inspector-visible => { root.set-inspector(root.inspector-visible); }
     changed active-thread-id => {
@@ -1002,8 +1007,11 @@ export component MainWindow inherits Window {
                                     }
                                 }
                                 for thread in root.threads: Rectangle {
-                                    visible: thread.project-id == project.id && !project.collapsed;
-                                    height: 42px;
+                                    private property <bool> shown: thread.project-id == project.id
+                                        && !project.collapsed
+                                        && (root.show-all-threads || thread.project-index < root.visible-thread-limit);
+                                    visible: self.shown;
+                                    height: self.shown ? 42px : 0px;
                                     x: 17px;
                                     width: 206px;
                                     border-radius: 7px;
@@ -1018,6 +1026,24 @@ export component MainWindow inherits Window {
                                         border-radius: 5px; background: close-touch.has-hover ? #34353a : transparent;
                                         CloseMark { x: 7px; y: 8px; }
                                         close-touch := TouchArea { mouse-cursor: pointer; clicked => { root.archive-thread(thread.id); } }
+                                    }
+                                }
+                                if !project.collapsed && project.thread-count > root.visible-thread-limit: Rectangle {
+                                    height: 30px;
+                                    x: 17px;
+                                    width: 206px;
+                                    border-radius: 6px;
+                                    background: thread-list-toggle-touch.has-hover ? #1b1c20 : transparent;
+                                    Text {
+                                        text: root.show-all-threads ? "Show less" : "Show more";
+                                        color: #a995ff;
+                                        font-size: 11px;
+                                        horizontal-alignment: TextHorizontalAlignment.center;
+                                        vertical-alignment: TextVerticalAlignment.center;
+                                    }
+                                    thread-list-toggle-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.show-all-threads = !root.show-all-threads; }
                                     }
                                 }
                             }
@@ -1288,6 +1314,25 @@ export component MainWindow inherits Window {
                         ComboBox { model: root.sandbox-names; current-index <=> root.default-sandbox-index; selected(value) => { root.select-default-sandbox(value); } }
                         Text { text: "Approval policy"; color: #c9cad0; font-size: 11px; }
                         ComboBox { model: root.approval-names; current-index <=> root.selected-approval-index; selected(value) => { root.select-approval(value); } }
+                        Rectangle { height: 1px; background: #2b2d33; }
+                        SectionTitle { text: "THREADS"; color: #a995ff; }
+                        Text { text: "Threads shown per project"; color: #c9cad0; font-size: 11px; }
+                        SpinBox {
+                            minimum: 1;
+                            maximum: 100;
+                            value: root.visible-thread-limit;
+                            edited => {
+                                root.visible-thread-limit = self.value;
+                                root.show-all-threads = false;
+                                root.set-visible-thread-limit(self.value);
+                            }
+                        }
+                        Text {
+                            text: "Show this many recent threads before offering Show more.";
+                            color: #858790;
+                            font-size: 10px;
+                            wrap: word-wrap;
+                        }
                         Rectangle { height: 1px; background: #2b2d33; }
                         SectionTitle { text: "FILES INSPECTOR"; color: #a995ff; }
                         Rectangle {

@@ -422,6 +422,8 @@ pub struct Preferences {
     pub summary_model: String,
     #[serde(default = "default_summary_effort")]
     pub summary_effort: String,
+    #[serde(default = "default_visible_thread_limit")]
+    pub visible_thread_limit: u32,
 }
 
 fn default_summary_model() -> String {
@@ -432,6 +434,9 @@ fn default_true() -> bool {
 }
 fn default_summary_effort() -> String {
     "low".into()
+}
+fn default_visible_thread_limit() -> u32 {
+    5
 }
 
 impl Default for Preferences {
@@ -449,6 +454,7 @@ impl Default for Preferences {
             respect_gitignore: true,
             summary_model: default_summary_model(),
             summary_effort: default_summary_effort(),
+            visible_thread_limit: default_visible_thread_limit(),
         }
     }
 }
@@ -476,9 +482,14 @@ mod tests {
     fn older_preferences_default_to_respecting_gitignore() {
         let mut value = serde_json::to_value(Preferences::default()).unwrap();
         value.as_object_mut().unwrap().remove("respect_gitignore");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("visible_thread_limit");
 
         let preferences: Preferences = serde_json::from_value(value).unwrap();
         assert!(preferences.respect_gitignore);
+        assert_eq!(preferences.visible_thread_limit, 5);
     }
 
     #[test]
@@ -520,6 +531,7 @@ mod tests {
         assert_eq!(ApprovalChoice::OnRequest.wire(), "on-request");
         assert_eq!(Preferences::default().summary_model, "gpt-5.6-luna");
         assert_eq!(Preferences::default().summary_effort, "low");
+        assert_eq!(Preferences::default().visible_thread_limit, 5);
     }
 
     #[test]
