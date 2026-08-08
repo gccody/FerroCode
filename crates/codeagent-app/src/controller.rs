@@ -353,8 +353,7 @@ impl Controller {
         }
         self.state.sync_active_conversation();
         self.state
-            .running_turns
-            .insert(local_thread_id.clone(), None);
+            .begin_turn(local_thread_id.clone(), unix_timestamp_millis() as u64);
         self.state.touch();
         if first_prompt {
             self.start_title_summary(&local_thread_id, &text);
@@ -609,7 +608,8 @@ impl Controller {
                         }
                         | PendingCall::TurnStart { local_thread_id },
                     ) => {
-                        self.state.running_turns.remove(local_thread_id);
+                        self.state
+                            .finish_turn(local_thread_id, unix_timestamp_millis() as u64);
                     }
                     Some(PendingCall::SummaryThreadStart(job)) => {
                         self.summary_pending.remove(&job.key);
@@ -724,7 +724,8 @@ impl Controller {
                         .insert(local_thread_id.clone(), thread_id.clone());
                     self.start_turn(local_thread_id, thread_id, turn);
                 } else {
-                    self.state.running_turns.remove(&local_thread_id);
+                    self.state
+                        .finish_turn(&local_thread_id, unix_timestamp_millis() as u64);
                     self.state
                         .error("Codex started a thread without returning its id");
                 }
@@ -737,7 +738,8 @@ impl Controller {
                 self.state.running_turns.insert(local_thread_id, turn_id);
             }
             PendingCall::Interrupt { local_thread_id } => {
-                self.state.running_turns.remove(&local_thread_id);
+                self.state
+                    .finish_turn(&local_thread_id, unix_timestamp_millis() as u64);
                 self.state.activity_log.push("Turn interrupted".into());
             }
             PendingCall::SummaryThreadStart(job) => {
@@ -991,7 +993,8 @@ impl Controller {
             }
             "turn/completed" => {
                 if let Some(local_id) = self.local_thread_id(&params) {
-                    self.state.finish_turn(&local_id);
+                    self.state
+                        .finish_turn(&local_id, unix_timestamp_millis() as u64);
                 }
                 let status = params
                     .pointer("/turn/status")

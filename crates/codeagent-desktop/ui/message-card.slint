@@ -170,5 +170,13 @@ export component MessageCard inherits Rectangle {
                 }
             }
         }
+
+        if message.duration-label != "": Text {
+            height: 14px;
+            text: "Worked for " + message.duration-label;
+            color: #777983;
+            font-size: 11px;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
     }
 }

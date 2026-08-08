@@ -43,6 +43,7 @@ pub struct AppState {
     pub active_local_thread: Option<String>,
     pub runtime_threads: HashMap<String, String>,
     pub running_turns: HashMap<String, Option<String>>,
+    pub turn_started_at_ms: HashMap<String, u64>,
     pub conversation: Vec<ConversationItem>,
     pub prefs: Preferences,
     pub approval: Option<Approval>,
@@ -75,6 +76,7 @@ impl AppState {
             active_local_thread: None,
             runtime_threads: HashMap::new(),
             running_turns: HashMap::new(),
+            turn_started_at_ms: HashMap::new(),
             conversation: Vec::new(),
             prefs: persisted.preferences,
             approval: None,
@@ -165,6 +167,19 @@ impl AppState {
         self.active_local_thread
             .as_ref()
             .is_some_and(|id| self.running_turns.contains_key(id))
+    }
+
+    pub fn begin_turn(&mut self, id: String, now_ms: u64) {
+        self.turn_started_at_ms.insert(id.clone(), now_ms);
+        self.running_turns.insert(id, None);
+    }
+
+    pub fn active_turn_elapsed_ms(&self, now_ms: u64) -> Option<u64> {
+        let id = self.active_local_thread.as_ref()?;
+        self.running_turns.contains_key(id).then_some(())?;
+        self.turn_started_at_ms
+            .get(id)
+            .map(|started_at| now_ms.saturating_sub(*started_at))
     }
 
     pub fn active_agent(&self) -> ThreadAgentSettings {
@@ -337,8 +352,33 @@ impl AppState {
         Some(id)
     }
 
-    pub fn finish_turn(&mut self, id: &str) {
+    pub fn finish_turn(&mut self, id: &str, now_ms: u64) {
         self.running_turns.remove(id);
+        if let Some(duration_ms) = self
+            .turn_started_at_ms
+            .remove(id)
+            .map(|started_at| now_ms.saturating_sub(started_at))
+        {
+            let messages = if self.active_local_thread.as_deref() == Some(id) {
+                Some(&mut self.conversation)
+            } else {
+                self.threads
+                    .iter_mut()
+                    .find(|thread| thread.id == id)
+                    .map(|thread| &mut thread.messages)
+            };
+            if let Some(messages) = messages
+                && let Some(last_user) = messages
+                    .iter()
+                    .rposition(|item| item.kind == codeagent_core::ItemKind::User)
+                && let Some(answer) = messages[last_user + 1..]
+                    .iter_mut()
+                    .rev()
+                    .find(|item| item.kind == codeagent_core::ItemKind::Assistant)
+            {
+                answer.duration_ms = Some(duration_ms);
+            }
+        }
         if self.active_local_thread.as_deref() != Some(id)
             && let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == id)
         {
@@ -576,7 +616,7 @@ mod tests {
         state.running_turns.insert(completed_thread.clone(), None);
         let active_thread = state.new_thread(3).unwrap();
 
-        state.finish_turn(&completed_thread);
+        state.finish_turn(&completed_thread, 1_000);
 
         assert!(!state.running_turns.contains_key(&completed_thread));
         assert!(
@@ -610,7 +650,7 @@ mod tests {
         let thread = state.new_thread(2).unwrap();
         state.running_turns.insert(thread.clone(), None);
 
-        state.finish_turn(&thread);
+        state.finish_turn(&thread, 1_000);
 
         assert!(
             !state
@@ -620,6 +660,36 @@ mod tests {
                 .unwrap()
                 .unread_completion
         );
+    }
+
+    #[test]
+    fn each_turn_tracks_and_stores_its_own_elapsed_time() {
+        let mut state = state();
+        state.add_project(r"C:\Code\Demo".into(), 1);
+        let thread = state.new_thread(2).unwrap();
+
+        let mut first_user = ConversationItem::new("u1", ItemKind::User, "You");
+        first_user.status = "completed".into();
+        let mut first_answer = ConversationItem::new("a1", ItemKind::Assistant, "Codex");
+        first_answer.status = "completed".into();
+        state.conversation.extend([first_user, first_answer]);
+        state.begin_turn(thread.clone(), 1_000);
+
+        assert_eq!(state.active_turn_elapsed_ms(3_450), Some(2_450));
+        state.finish_turn(&thread, 3_450);
+        assert_eq!(state.conversation[1].duration_ms, Some(2_450));
+        assert_eq!(state.active_turn_elapsed_ms(4_000), None);
+
+        let mut second_user = ConversationItem::new("u2", ItemKind::User, "You");
+        second_user.status = "completed".into();
+        let mut second_answer = ConversationItem::new("a2", ItemKind::Assistant, "Codex");
+        second_answer.status = "completed".into();
+        state.conversation.extend([second_user, second_answer]);
+        state.begin_turn(thread.clone(), 10_000);
+        state.finish_turn(&thread, 15_125);
+
+        assert_eq!(state.conversation[1].duration_ms, Some(2_450));
+        assert_eq!(state.conversation[3].duration_ms, Some(5_125));
     }
 
     #[test]

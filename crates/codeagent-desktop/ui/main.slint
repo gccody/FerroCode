@@ -41,6 +41,7 @@ export component MainWindow inherits Window {
     in property <string> usage-left-label: "";
     in property <int> context-percent: 0;
     in property <bool> busy: false;
+    in property <string> turn-elapsed-label: "";
     in property <bool> has-project: false;
     in-out property <bool> sidebar-visible: true;
     in-out property <string> sidebar-search-text: "";
@@ -174,6 +175,7 @@ export component MainWindow inherits Window {
                 context-percent: root.context-percent;
                 connected: root.connected;
                 busy: root.busy;
+                turn-elapsed-label: root.turn-elapsed-label;
                 has-project: root.has-project;
                 inspector-visible <=> root.inspector-visible;
                 model-names: root.model-names;

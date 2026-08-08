@@ -46,7 +46,23 @@ pub(super) fn message_height(item: &ConversationItem, markdown_blocks: &[Markdow
         .map(|block| block.block_height)
         .sum::<f32>()
         + markdown_blocks.len().saturating_sub(1) as f32 * 7.0;
-    (content_height + 10.0).max(38.0)
+    (content_height
+        + 10.0
+        + if item.duration_ms.is_some() {
+            18.0
+        } else {
+            0.0
+        })
+    .max(38.0)
+}
+
+pub(super) fn elapsed_duration_label(duration_ms: u64) -> String {
+    let seconds = duration_ms / 1_000;
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    }
 }
 
 pub(super) fn thread_rows(state: &AppState, search: &str) -> Vec<ThreadRow> {
@@ -160,6 +176,7 @@ pub(super) fn message_rows_match(current: &MessageRow, next: &MessageRow) -> boo
         && current.status == next.status
         && current.user == next.user
         && current.activity == next.activity
+        && current.duration_label == next.duration_label
         && current.row_height == next.row_height
 }
 
@@ -190,6 +207,11 @@ pub(super) fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
                         | ItemKind::Plan
                         | ItemKind::System
                 ),
+                duration_label: item
+                    .duration_ms
+                    .map(elapsed_duration_label)
+                    .unwrap_or_default()
+                    .into(),
                 row_height,
             }
         })

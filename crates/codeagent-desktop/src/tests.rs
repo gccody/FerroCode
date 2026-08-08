@@ -46,6 +46,13 @@ fn context_ring_path_tracks_empty_partial_and_full_usage() {
 }
 
 #[test]
+fn elapsed_duration_labels_are_compact_and_readable() {
+    assert_eq!(elapsed_duration_label(999), "0s");
+    assert_eq!(elapsed_duration_label(42_000), "42s");
+    assert_eq!(elapsed_duration_label(68_000), "1m 08s");
+}
+
+#[test]
 fn user_message_height_grows_with_wrapped_content() {
     let mut short = ConversationItem::new("short", ItemKind::User, "User");
     short.body = "Hi".into();

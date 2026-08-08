@@ -3,7 +3,11 @@
 use codeagent_app::Controller;
 use codeagent_core::LocalStore;
 use slint::{ComponentHandle, Timer, TimerMode};
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 slint::include_modules!();
 
@@ -50,6 +54,25 @@ fn main() -> Result<(), slint::PlatformError> {
             && let Some(ui) = weak_ui.upgrade()
         {
             sync_ui(&ui, &poll_controller.borrow(), &poll_search.borrow());
+        }
+    });
+
+    let elapsed_controller = controller.clone();
+    let elapsed_ui = ui.as_weak();
+    let elapsed_timer = Timer::default();
+    elapsed_timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let label = elapsed_controller
+            .borrow()
+            .state
+            .active_turn_elapsed_ms(now_ms)
+            .map(elapsed_duration_label)
+            .unwrap_or_default();
+        if let Some(ui) = elapsed_ui.upgrade() {
+            ui.set_turn_elapsed_label(label.into());
         }
     });
 
