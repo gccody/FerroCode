@@ -122,6 +122,8 @@ pub struct ConversationItem {
     pub collapsed: bool,
     #[serde(default)]
     pub summary: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 impl ConversationItem {
@@ -134,6 +136,7 @@ impl ConversationItem {
             status: "running".into(),
             collapsed: false,
             summary: None,
+            duration_ms: None,
         }
     }
 }

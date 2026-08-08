@@ -19,6 +19,7 @@ export component ConversationPane inherits Rectangle {
     in property <int> context-percent: 0;
     in property <bool> connected: false;
     in property <bool> busy: false;
+    in property <string> turn-elapsed-label: "";
     in property <bool> has-project: false;
     in-out property <bool> inspector-visible: false;
     in property <[string]> model-names;
@@ -238,6 +239,23 @@ export component ConversationPane inherits Rectangle {
                     ComposerComboBox { width: 99px; model: root.effort-names; current-index <=> root.selected-effort-index; selected(value) => { root.select-effort(value); } }
                     ComposerComboBox { width: 98px; model: root.sandbox-names; current-index <=> root.selected-sandbox-index; selected(value) => { root.select-sandbox(value); } }
                     Rectangle { horizontal-stretch: 1; }
+                    if root.busy: Rectangle {
+                        width: working-time.preferred-width + 16px;
+                        height: 24px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 12px;
+                        background: #202126;
+                        border-width: 1px;
+                        border-color: #34363d;
+                        working-time := Text {
+                            x: 8px;
+                            height: parent.height;
+                            text: "Working " + root.turn-elapsed-label;
+                            color: #aaa6ba;
+                            font-size: 11px;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                    }
                     ContextIndicator {
                         y: (parent.height - self.height) / 2;
                         label: root.context-label;
