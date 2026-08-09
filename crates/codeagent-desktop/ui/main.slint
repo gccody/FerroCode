@@ -44,6 +44,7 @@ export component MainWindow inherits Window {
     in property <string> turn-elapsed-label: "";
     in property <bool> has-project: false;
     in-out property <bool> sidebar-visible: true;
+    private property <length> sidebar-expanded-width: 247px;
     in-out property <string> sidebar-search-text: "";
     in-out property <bool> inspector-visible: false;
     in-out property <int> inspector-tab: 0;
@@ -153,6 +154,8 @@ export component MainWindow inherits Window {
                 projects: root.projects;
                 threads: root.threads;
                 expanded <=> root.sidebar-visible;
+                available-width: root.width;
+                expanded-width <=> root.sidebar-expanded-width;
                 search-text <=> root.sidebar-search-text;
                 visible-thread-limit: root.visible-thread-limit;
                 show-all-threads <=> root.show-all-threads;
