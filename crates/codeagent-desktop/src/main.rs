@@ -69,7 +69,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     })));
     install_input_focus_dismissal(&ui);
-    install_window_chrome(&ui);
+    let _window_chrome_timer = install_window_chrome(&ui);
     let search = Rc::new(RefCell::new(String::new()));
     let attachments = Rc::new(RefCell::new(Vec::<PendingAttachment>::new()));
     let attachment_temp_dir = Rc::new(tempfile::tempdir().ok());

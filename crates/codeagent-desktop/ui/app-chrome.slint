@@ -3,14 +3,17 @@ import { SmallButton } from "controls.slint";
 
 component CaptionButton inherits Rectangle {
     in property <bool> close-button: false;
+    in property <int> button-id: 0;
+    in property <int> native-hover: 0;
+    in property <int> native-pressed: 0;
     out property <bool> hovered: hit.has-hover;
     callback clicked;
 
     width: 46px;
     height: 36px;
-    background: hit.pressed
+    background: hit.pressed || root.native-pressed == root.button-id
         ? (root.close-button ? #a8221a : #313238)
-        : hit.has-hover
+        : hit.has-hover || root.native-hover == root.button-id
             ? (root.close-button ? #c42b1c : #25262a)
             : transparent;
 
@@ -21,6 +24,7 @@ component CaptionButton inherits Rectangle {
 }
 
 component MinimizeButton inherits CaptionButton {
+    button-id: 1;
     Rectangle {
         x: (parent.width - self.width) / 2;
         y: 18px;
@@ -32,6 +36,7 @@ component MinimizeButton inherits CaptionButton {
 
 component MaximizeButton inherits CaptionButton {
     in property <bool> maximized: false;
+    button-id: 2;
 
     if !root.maximized: Rectangle {
         x: (parent.width - self.width) / 2;
@@ -64,6 +69,7 @@ component MaximizeButton inherits CaptionButton {
 }
 
 component CloseButton inherits CaptionButton {
+    button-id: 3;
     close-button: true;
     Path {
         x: (parent.width - self.width) / 2;
@@ -84,6 +90,8 @@ export component AppHeader inherits Rectangle {
     in property <bool> connected: false;
     in property <string> connection-text: "Starting Codex...";
     in property <bool> maximized: false;
+    in property <int> native-caption-hover: 0;
+    in property <int> native-caption-pressed: 0;
     callback drag-window;
     callback toggle-maximize;
     callback minimize;
@@ -160,12 +168,22 @@ export component AppHeader inherits Rectangle {
             font-size: 11px;
             vertical-alignment: TextVerticalAlignment.center;
         }
-        MinimizeButton { clicked => { root.minimize(); } }
+        MinimizeButton {
+            native-hover: root.native-caption-hover;
+            native-pressed: root.native-caption-pressed;
+            clicked => { root.minimize(); }
+        }
         MaximizeButton {
             maximized: root.maximized;
+            native-hover: root.native-caption-hover;
+            native-pressed: root.native-caption-pressed;
             clicked => { root.toggle-maximize(); }
         }
-        CloseButton { clicked => { root.close(); } }
+        CloseButton {
+            native-hover: root.native-caption-hover;
+            native-pressed: root.native-caption-pressed;
+            clicked => { root.close(); }
+        }
     }
 
     Rectangle {

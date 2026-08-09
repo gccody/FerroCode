@@ -15,7 +15,7 @@ export component MainWindow inherits Window {
     no-frame: true;
     resize-border-width: root.maximized ? 0px : 6px;
     preferred-width: 1440px; preferred-height: 900px;
-    min-width: 980px; min-height: 640px;
+    min-width: 500px; min-height: 640px;
     background: #0d0e10;
     default-font-family: "Segoe UI";
 
@@ -83,6 +83,8 @@ export component MainWindow inherits Window {
     in property <bool> toast-error: false;
     in property <string> codex-update-version: "";
     in property <bool> codex-update-in-progress: false;
+    in-out property <int> caption-hover: 0;
+    in-out property <int> caption-pressed: 0;
 
     callback add-project;
     callback open-project(string);
@@ -146,6 +148,8 @@ export component MainWindow inherits Window {
             connected: root.connected;
             connection-text: root.connection-text;
             maximized: root.maximized;
+            native-caption-hover: root.caption-hover;
+            native-caption-pressed: root.caption-pressed;
             drag-window => { root.drag-window(); }
             toggle-maximize => { root.maximized = !root.maximized; }
             minimize => { root.minimized = true; }
