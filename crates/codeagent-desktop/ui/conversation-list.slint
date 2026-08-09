@@ -28,8 +28,7 @@ export component ListView inherits Rectangle {
     accessible-orientation: Orientation.vertical;
 
     flickable := Flickable {
-        x: (parent.width - self.width) / 2;
-        width: min(parent.width, root.content-width);
+        width: parent.width;
         height: parent.height;
         interactive: false;
         @children
@@ -98,20 +97,6 @@ export component ListView inherits Rectangle {
                 }
             }
 
-            scroll-event(event) => {
-                if event.delta-y != 0 {
-                    root.scroll-offset = max(
-                        0px,
-                        min(root.stable-scroll-range, root.scroll-offset - event.delta-y)
-                    );
-                    root.viewport-y = root.stable-scroll-range <= 0px
-                        ? 0px
-                        : 0px - root.scroll-offset * root.scroll-range / root.stable-scroll-range;
-                    root.scrolled();
-                    return accept;
-                }
-                reject
-            }
         }
     }
 }
