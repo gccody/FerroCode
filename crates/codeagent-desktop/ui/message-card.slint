@@ -9,16 +9,18 @@ export component MessageCard inherits Rectangle {
     callback toggle-message(string);
     callback toggle-response-details(string);
     horizontal-stretch: 1;
-    height: message.activity && !message.collapsed && message.body != ""
+    private property <length> content-height: message.activity && !message.collapsed && message.body != ""
         ? activity-body.preferred-height + 44px
         : message.row-height;
+    // Keep a clear, consistent pause between each side of the conversation.
+    height: self.content-height + 10px;
     background: transparent;
 
     if message.user: Rectangle {
         // Use the renderer's proportional-font measurement so every bubble
         // has exactly 14 px of horizontal padding, including short messages.
         width: min(bubble-text.preferred-width + 28px, min(650px, parent.width - 18px));
-        height: parent.height - 10px;
+        height: root.content-height - 10px;
         x: parent.width - self.width - 8px;
         y: 5px;
         border-radius: 14px;
@@ -75,7 +77,7 @@ export component MessageCard inherits Rectangle {
     }
 
     if message.response-summary: Rectangle {
-        x: 8px; width: parent.width - 16px; height: parent.height;
+        x: 8px; width: parent.width - 16px; height: root.content-height;
         summary-label := Text {
             x: 0px; y: 0px; width: self.preferred-width; height: parent.height - 1px;
             text: message.title;
@@ -104,6 +106,7 @@ export component MessageCard inherits Rectangle {
     }
 
     if !message.user && !message.activity && !message.response-summary: VerticalLayout {
+        width: parent.width; height: root.content-height;
         padding-left: 8px; padding-right: 8px; padding-top: 5px; padding-bottom: 5px;
         spacing: 7px;
 
