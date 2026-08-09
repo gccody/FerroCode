@@ -1,6 +1,6 @@
 # Ferro Code
 
-Ferro Code is a lightweight native Windows control surface for the locally installed `codex app-server`. It reuses the Codex CLI's existing ChatGPT subscription or API authentication and stores projects and conversation history locally.
+Ferro Code is a lightweight native desktop control surface for the locally installed `codex app-server`. It runs on Windows, macOS, and Linux, reuses the Codex CLI's existing ChatGPT subscription or API authentication, and stores projects and conversation history locally.
 
 The desktop UI is implemented in [Slint](https://slint.dev/) with its software renderer. There is no Electron shell, browser UI, webview, JavaScript frontend, or hosted middleman.
 
@@ -12,7 +12,7 @@ The desktop UI is implemented in [Slint](https://slint.dev/) with its software r
 - Model, reasoning-effort, sandbox, and approval controls
 - Native command and file-change approvals
 - Structured `request_user_input` questions
-- Image paste previews and arbitrary file attachments through native Windows pickers
+- Image paste previews and arbitrary file attachments through native system pickers
 - Stop/interrupt support
 - Thread search and removal
 - Workspace file list, activity timeline, and Git status inspector
@@ -21,30 +21,38 @@ The desktop UI is implemented in [Slint](https://slint.dev/) with its software r
 
 ## Requirements
 
-- Windows 10 or later
+- Windows 10 or later, macOS, or a Linux desktop with X11 or Wayland and an XDG desktop portal
 - Rust 1.92 or later
 - Codex CLI installed and available as `codex` on `PATH`
 - An existing Codex login (`codex login`) or another supported Codex authentication method
 
 ## Run
 
-```powershell
+```shell
 cargo run -p ferro-code
 ```
 
 Build the size-optimized application:
 
-```powershell
+```shell
 cargo build --release -p ferro-code
 ```
 
-The executable is written to `target\release\ferro-code.exe`. Local state is stored at `%LOCALAPPDATA%\Ferro Code\state.json`.
+The executable is written to `target/release/ferro-code` (`target\release\ferro-code.exe` on Windows).
+
+Local state follows each operating system's standard data location:
+
+| Platform | State file |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Ferro Code\state.json` |
+| macOS | `~/Library/Application Support/Ferro Code/state.json` |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/ferro-code/state.json` |
 
 ## Test and lint
 
 The default suite is local and does not contact a model:
 
-```powershell
+```shell
 cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
@@ -52,13 +60,13 @@ cargo fmt --all -- --check
 
 The ignored protocol check exercises the configured local Codex installation:
 
-```powershell
+```shell
 cargo test -p ferro-code-protocol real_codex_app_server_handshake -- --ignored
 ```
 
 For fast iteration on UI-independent behavior, test only the affected crate:
 
-```powershell
+```shell
 cargo test -p ferro-code-core
 cargo test -p ferro-code-app
 cargo test -p ferro-code-protocol

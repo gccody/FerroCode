@@ -8,13 +8,18 @@ description = "A lightweight Slint control surface for Codex"
 build = "build.rs"
 
 [dependencies]
-arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
 ferro-code-app.workspace = true
 ferro-code-core.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 slint.workspace = true
-rfd = { version = "0.15", default-features = false }
 tempfile = "3"
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+rfd = { version = "0.15", default-features = false }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5.4"
