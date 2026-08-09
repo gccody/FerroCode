@@ -300,6 +300,14 @@ impl Controller {
         self.state.archive_thread(id);
     }
 
+    pub fn toggle_message(&mut self, id: &str) {
+        self.state.toggle_message(id);
+    }
+
+    pub fn toggle_response_details(&mut self, id: &str) {
+        self.state.toggle_response_details(id);
+    }
+
     pub fn send_prompt(&mut self, text: String, attachments: Vec<String>) {
         let text = text.trim().to_owned();
         if text.is_empty()
@@ -1253,11 +1261,14 @@ impl Controller {
                 existing.body = body;
             }
             existing.status = status(completed).into();
-            existing.collapsed = completed
+            if completed
                 && matches!(
                     kind,
                     ItemKind::Command | ItemKind::Tool | ItemKind::FileChange | ItemKind::Plan
-                );
+                )
+            {
+                existing.collapsed = true;
+            }
         } else {
             let mut entry = ConversationItem::new(id, kind, title);
             entry.body = body;
@@ -1265,11 +1276,7 @@ impl Controller {
             entry.collapsed = completed
                 && matches!(
                     kind,
-                    ItemKind::Reasoning
-                        | ItemKind::Command
-                        | ItemKind::Tool
-                        | ItemKind::FileChange
-                        | ItemKind::Plan
+                    ItemKind::Command | ItemKind::Tool | ItemKind::FileChange | ItemKind::Plan
                 );
             messages.push(entry);
         }
@@ -1493,7 +1500,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_command_is_collapsed() {
+    fn completed_command_collapses_while_response_details_remain_visible() {
         let mut controller = Controller::new(PersistedState::default());
         controller.state.add_project("demo".into(), 1);
         let local = controller.state.new_thread(2).unwrap();

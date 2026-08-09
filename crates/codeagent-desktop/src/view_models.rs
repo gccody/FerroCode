@@ -24,6 +24,19 @@ pub(super) fn context_ring_path(percent: u32) -> String {
 }
 
 pub(super) fn message_height(item: &ConversationItem, markdown_blocks: &[MarkdownBlock]) -> f32 {
+    if item.collapsed
+        && matches!(
+            item.kind,
+            ItemKind::Command
+                | ItemKind::FileChange
+                | ItemKind::Tool
+                | ItemKind::Plan
+                | ItemKind::System
+        )
+    {
+        return 38.0;
+    }
+
     if matches!(
         item.kind,
         ItemKind::Command
@@ -32,6 +45,8 @@ pub(super) fn message_height(item: &ConversationItem, markdown_blocks: &[Markdow
             | ItemKind::Plan
             | ItemKind::System
     ) {
+        // Expanded activity rows are measured by Slint from the rendered Text.
+        // A fixed estimate accumulates visible error over long command output.
         return 42.0;
     }
 
@@ -46,14 +61,7 @@ pub(super) fn message_height(item: &ConversationItem, markdown_blocks: &[Markdow
         .map(|block| block.block_height)
         .sum::<f32>()
         + markdown_blocks.len().saturating_sub(1) as f32 * 7.0;
-    (content_height
-        + 10.0
-        + if item.duration_ms.is_some() {
-            18.0
-        } else {
-            0.0
-        })
-    .max(38.0)
+    (content_height + 10.0).max(38.0)
 }
 
 pub(super) fn elapsed_duration_label(duration_ms: u64) -> String {
@@ -150,6 +158,24 @@ pub(super) fn update_message_rows(current: &VecModel<MessageRow>, next: Vec<Mess
         return true;
     }
 
+    let disclosure_changed = next
+        .iter()
+        .take(shared_len)
+        .enumerate()
+        .any(|(index, row)| {
+            current.row_data(index).is_some_and(|current| {
+                current.collapsed != row.collapsed
+                    || current.response_summary != row.response_summary
+                    || current.response_id != row.response_id
+            })
+        });
+    if disclosure_changed {
+        // Slint's ListView can retain a stale delegate height when a row is
+        // expanded in place. Replacing the vector forces a structural reflow.
+        current.set_vec(next);
+        return true;
+    }
+
     let mut changed = current.row_count() != next.len();
     for (index, row) in next.iter().take(shared_len).enumerate() {
         if current
@@ -176,46 +202,128 @@ pub(super) fn message_rows_match(current: &MessageRow, next: &MessageRow) -> boo
         && current.status == next.status
         && current.user == next.user
         && current.activity == next.activity
+        && current.collapsed == next.collapsed
+        && current.response_summary == next.response_summary
+        && current.response_id == next.response_id
         && current.duration_label == next.duration_label
         && current.row_height == next.row_height
 }
 
 pub(super) fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
-    items
-        .iter()
-        .filter(|item| {
-            !(item.kind == ItemKind::Reasoning
-                && item.body.trim().is_empty()
-                && item.status != "running")
-        })
-        .map(|item| {
-            let markdown_blocks = markdown_blocks(item);
-            let row_height = message_height(item, &markdown_blocks);
-            MessageRow {
-                id: item.id.clone().into(),
-                kind: item.kind.wire_name().into(),
-                title: activity_title(item).into(),
-                body: item.body.clone().into(),
-                markdown_blocks: model(markdown_blocks),
-                status: item.status.clone().into(),
-                user: item.kind == ItemKind::User,
-                activity: matches!(
-                    item.kind,
-                    ItemKind::Command
-                        | ItemKind::FileChange
-                        | ItemKind::Tool
-                        | ItemKind::Plan
-                        | ItemKind::System
-                ),
-                duration_label: item
-                    .duration_ms
-                    .map(elapsed_duration_label)
-                    .unwrap_or_default()
-                    .into(),
-                row_height,
+    let mut rows = Vec::new();
+    let mut index = 0;
+    while index < items.len() {
+        if items[index].kind != ItemKind::User {
+            if message_is_visible(&items[index]) {
+                rows.push(message_row(&items[index]));
             }
-        })
-        .collect()
+            index += 1;
+            continue;
+        }
+
+        rows.push(message_row(&items[index]));
+        let response_start = index + 1;
+        let response_end = items[response_start..]
+            .iter()
+            .position(|item| item.kind == ItemKind::User)
+            .map(|offset| response_start + offset)
+            .unwrap_or(items.len());
+        let final_answer = items[response_start..response_end]
+            .iter()
+            .rposition(|item| item.kind == ItemKind::Assistant && item.duration_ms.is_some())
+            .map(|offset| response_start + offset);
+
+        if let Some(final_answer) = final_answer {
+            let has_details = (response_start..response_end)
+                .any(|detail| detail != final_answer && message_is_visible(&items[detail]));
+            if has_details {
+                rows.push(response_summary_row(&items[final_answer]));
+                if !items[final_answer].response_details_collapsed {
+                    rows.extend(
+                        (response_start..response_end)
+                            .filter(|detail| {
+                                *detail != final_answer && message_is_visible(&items[*detail])
+                            })
+                            .map(|detail| message_row(&items[detail])),
+                    );
+                }
+                rows.push(message_row(&items[final_answer]));
+            } else {
+                rows.extend(
+                    items[response_start..response_end]
+                        .iter()
+                        .filter(|item| message_is_visible(item))
+                        .map(message_row),
+                );
+            }
+        } else {
+            rows.extend(
+                items[response_start..response_end]
+                    .iter()
+                    .filter(|item| message_is_visible(item))
+                    .map(message_row),
+            );
+        }
+        index = response_end;
+    }
+    rows
+}
+
+fn message_is_visible(item: &ConversationItem) -> bool {
+    !(item.kind == ItemKind::Reasoning && item.body.trim().is_empty() && item.status != "running")
+}
+
+fn message_row(item: &ConversationItem) -> MessageRow {
+    let markdown_blocks = markdown_blocks(item);
+    let row_height = message_height(item, &markdown_blocks);
+    MessageRow {
+        id: item.id.clone().into(),
+        kind: item.kind.wire_name().into(),
+        title: activity_title(item).into(),
+        body: item.body.clone().into(),
+        markdown_blocks: model(markdown_blocks),
+        status: item.status.clone().into(),
+        user: item.kind == ItemKind::User,
+        activity: matches!(
+            item.kind,
+            ItemKind::Command
+                | ItemKind::FileChange
+                | ItemKind::Tool
+                | ItemKind::Plan
+                | ItemKind::System
+        ),
+        collapsed: item.collapsed,
+        response_summary: false,
+        response_id: "".into(),
+        duration_label: item
+            .duration_ms
+            .map(elapsed_duration_label)
+            .unwrap_or_default()
+            .into(),
+        row_height,
+    }
+}
+
+fn response_summary_row(final_answer: &ConversationItem) -> MessageRow {
+    let duration_label = final_answer
+        .duration_ms
+        .map(elapsed_duration_label)
+        .unwrap_or_default();
+    MessageRow {
+        id: format!("response-details-{}", final_answer.id).into(),
+        kind: "response-summary".into(),
+        title: format!("Worked for {duration_label}").into(),
+        body: "".into(),
+        markdown_blocks: model(Vec::<MarkdownBlock>::new()),
+        status: "completed".into(),
+        user: false,
+        activity: false,
+        collapsed: final_answer.response_details_collapsed,
+        response_summary: true,
+        response_id: final_answer.id.clone().into(),
+        duration_label: duration_label.into(),
+        row_height: 48.0,
+    }
 }
 
 pub(super) fn question_row(index: usize, question: &Question) -> QuestionRow {

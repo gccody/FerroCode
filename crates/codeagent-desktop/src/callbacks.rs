@@ -104,6 +104,20 @@ pub(super) fn wire_callbacks(
         MainWindow::on_archive_thread,
         |controller, value| controller.archive_thread(value),
     );
+    callback_with_string(
+        ui,
+        controller,
+        search,
+        MainWindow::on_toggle_message,
+        |controller, value| controller.toggle_message(value),
+    );
+    callback_with_string(
+        ui,
+        controller,
+        search,
+        MainWindow::on_toggle_response_details,
+        |controller, value| controller.toggle_response_details(value),
+    );
 
     let weak = ui.as_weak();
     let controller_ref = controller.clone();

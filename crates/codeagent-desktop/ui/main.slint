@@ -92,6 +92,8 @@ export component MainWindow inherits Window {
     callback paste-image() -> bool;
     callback remove-attachment(int);
     callback copy-code(string);
+    callback toggle-message(string);
+    callback toggle-response-details(string);
     callback select-model(string);
     callback select-effort(string);
     callback select-sandbox(string);
@@ -190,6 +192,8 @@ export component MainWindow inherits Window {
                 paste-image => { root.paste-image() }
                 remove-attachment(index) => { root.remove-attachment(index); }
                 copy-code(text) => { root.copy-code(text); }
+                toggle-message(id) => { root.toggle-message(id); }
+                toggle-response-details(id) => { root.toggle-response-details(id); }
                 select-model(value) => { root.select-model(value); }
                 select-effort(value) => { root.select-effort(value); }
                 select-sandbox(value) => { root.select-sandbox(value); }

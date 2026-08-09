@@ -27,6 +27,8 @@ pub struct LocalThread {
     #[serde(default)]
     pub unread_completion: bool,
     #[serde(default)]
+    pub response_group_collapse_initialized: bool,
+    #[serde(default)]
     pub agent: ThreadAgentSettings,
 }
 
@@ -121,6 +123,8 @@ pub struct ConversationItem {
     pub status: String,
     pub collapsed: bool,
     #[serde(default)]
+    pub response_details_collapsed: bool,
+    #[serde(default)]
     pub summary: Option<String>,
     #[serde(default)]
     pub duration_ms: Option<u64>,
@@ -135,6 +139,7 @@ impl ConversationItem {
             body: String::new(),
             status: "running".into(),
             collapsed: false,
+            response_details_collapsed: false,
             summary: None,
             duration_ms: None,
         }
@@ -518,6 +523,7 @@ mod tests {
                     capacity_tokens: 120_000,
                 }),
                 unread_completion: true,
+                response_group_collapse_initialized: true,
                 agent: ThreadAgentSettings::default(),
             }],
             active_project: Some("p".into()),

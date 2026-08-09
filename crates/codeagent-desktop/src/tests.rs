@@ -96,6 +96,79 @@ fn activity_items_use_compact_rows_and_past_tense_when_finished() {
 }
 
 #[test]
+fn completed_responses_collapse_into_one_summary_above_the_final_answer() {
+    let user = ConversationItem::new("user", ItemKind::User, "You");
+    let commentary = ConversationItem::new("commentary", ItemKind::Assistant, "Codex");
+    let mut tool = ConversationItem::new("tool", ItemKind::Tool, "Search");
+    tool.collapsed = true;
+    let mut final_answer = ConversationItem::new("final", ItemKind::Assistant, "Codex");
+    final_answer.body = "Done".into();
+    final_answer.duration_ms = Some(321_000);
+    final_answer.response_details_collapsed = true;
+
+    let collapsed = message_rows(&[
+        user.clone(),
+        commentary.clone(),
+        tool.clone(),
+        final_answer.clone(),
+    ]);
+
+    assert_eq!(collapsed.len(), 3);
+    assert!(collapsed[1].response_summary);
+    assert_eq!(collapsed[1].title.as_str(), "Worked for 5m 21s");
+    assert!(collapsed[1].collapsed);
+    assert_eq!(collapsed[2].id.as_str(), "final");
+
+    final_answer.response_details_collapsed = false;
+    let expanded = message_rows(&[user, commentary, tool, final_answer]);
+    assert_eq!(expanded.len(), 5);
+    assert!(!expanded[1].collapsed);
+    assert_eq!(expanded[2].id.as_str(), "commentary");
+    assert_eq!(expanded[3].id.as_str(), "tool");
+    assert_eq!(expanded[4].id.as_str(), "final");
+}
+
+#[test]
+fn expanding_a_nested_activity_preserves_every_response_row() {
+    let user = ConversationItem::new("user", ItemKind::User, "You");
+    let commentary = ConversationItem::new("commentary", ItemKind::Assistant, "Codex");
+    let mut command = ConversationItem::new("command", ItemKind::Command, "cargo test");
+    command.body = "test output ".repeat(120);
+    command.collapsed = true;
+    let mut final_answer = ConversationItem::new("final", ItemKind::Assistant, "Codex");
+    final_answer.body = "Done".into();
+    final_answer.duration_ms = Some(2_000);
+
+    let items = [user, commentary, command.clone(), final_answer];
+    let current = VecModel::from(message_rows(&items));
+
+    command.collapsed = false;
+    let expanded_items = [
+        items[0].clone(),
+        items[1].clone(),
+        command,
+        items[3].clone(),
+    ];
+    assert!(update_message_rows(&current, message_rows(&expanded_items)));
+
+    assert_eq!(current.row_count(), 5);
+    assert_eq!(
+        (0..current.row_count())
+            .map(|index| current.row_data(index).unwrap().id.to_string())
+            .collect::<Vec<_>>(),
+        [
+            "user",
+            "response-details-final",
+            "commentary",
+            "command",
+            "final"
+        ]
+    );
+    assert!(!current.row_data(3).unwrap().collapsed);
+    assert_eq!(current.row_data(3).unwrap().body, expanded_items[2].body);
+}
+
+#[test]
 fn file_rows_form_a_directory_first_tree_and_preserve_changed_files() {
     let paths = vec![
         "Cargo.toml".into(),

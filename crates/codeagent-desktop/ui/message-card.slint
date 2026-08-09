@@ -5,8 +5,12 @@ import { CopyMark } from "icons.slint";
 export component MessageCard inherits Rectangle {
     in property <MessageRow> message;
     callback copy-code(string);
+    callback toggle-message(string);
+    callback toggle-response-details(string);
     horizontal-stretch: 1;
-    height: message.row-height;
+    height: message.activity && !message.collapsed && message.body != ""
+        ? activity-body.preferred-height + 44px
+        : message.row-height;
     background: transparent;
 
     if message.user: Rectangle {
@@ -31,18 +35,74 @@ export component MessageCard inherits Rectangle {
     }
 
     if message.activity: Rectangle {
-        x: 8px; width: parent.width - 16px; height: parent.height;
+        x: 8px; width: parent.width - 16px; height: 38px;
+        border-radius: 5px;
+        background: activity-touch.has-hover ? #23242a : transparent;
+        accessible-role: button;
+        accessible-label: (message.collapsed ? "Expand " : "Collapse ") + message.title;
         Path {
-            x: 4px; y: (parent.height - 12px) / 2; width: 11px; height: 12px;
-            commands: message.status == "running" ? "M 1 2 L 4.5 6 L 8 2" : "M 2 1 L 6 5 L 2 9";
-            viewbox-width: 10; viewbox-height: 10; fill: transparent; stroke: #9a9ca4; stroke-width: 1.7px;
+            x: 6px; y: 13px; width: 11px; height: 12px;
+            commands: message.collapsed ? "M 2 1 L 6 5 L 2 9" : "M 1 2 L 4.5 6 L 8 2";
+            viewbox-width: 10; viewbox-height: 10;
+            fill: transparent; stroke: #9a9ca4; stroke-width: 1.7px;
             stroke-line-cap: round; stroke-line-join: round;
         }
-        Text { x: 26px; width: parent.width - 74px; text: message.title; color: #989aa2; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
-        if message.status == "running": Spinner { x: parent.width - 25px; y: (parent.height - 14px) / 2; width: 14px; height: 14px; }
+        Text {
+            x: 26px; y: 0px; width: parent.width - 74px; height: 38px;
+            text: message.title;
+            color: activity-touch.has-hover ? #d0d1d6 : #989aa2;
+            font-size: 12px;
+            vertical-alignment: TextVerticalAlignment.center; overflow: elide;
+        }
+        if message.status == "running": Spinner { x: parent.width - 25px; y: 12px; width: 14px; height: 14px; }
+        activity-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.toggle-message(message.id); }
+        }
     }
 
-    if !message.user && !message.activity: VerticalLayout {
+    activity-body := Text {
+        visible: message.activity && !message.collapsed && message.body != "";
+        x: 34px; y: 38px; width: parent.width - 58px;
+        height: self.preferred-height;
+        text: message.body;
+        color: #c5c5cb;
+        font-family: message.kind == "command" ? "Cascadia Mono" : "Segoe UI";
+        font-size: 12px;
+        wrap: word-wrap;
+        vertical-alignment: TextVerticalAlignment.top;
+    }
+
+    if message.response-summary: Rectangle {
+        x: 8px; width: parent.width - 16px; height: parent.height;
+        summary-label := Text {
+            x: 0px; y: 0px; width: self.preferred-width; height: parent.height - 1px;
+            text: message.title;
+            color: #8f919a;
+            font-size: 11px;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+        Path {
+            x: min(summary-label.preferred-width + 8px, parent.width - 16px);
+            y: 18px; width: 9px; height: 9px;
+            commands: message.collapsed ? "M 2 1 L 6 5 L 2 9" : "M 1 2 L 4.5 6 L 8 2";
+            viewbox-width: 10; viewbox-height: 10;
+            fill: transparent; stroke: #858790; stroke-width: 1.5px;
+            stroke-line-cap: round; stroke-line-join: round;
+        }
+        Rectangle {
+            x: 0px; y: parent.height - 1px; width: parent.width; height: 1px;
+            background: #222329;
+        }
+        accessible-role: button;
+        accessible-label: (message.collapsed ? "Expand " : "Collapse ") + message.title;
+        summary-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.toggle-response-details(message.response-id); }
+        }
+    }
+
+    if !message.user && !message.activity && !message.response-summary: VerticalLayout {
         padding-left: 8px; padding-right: 8px; padding-top: 5px; padding-bottom: 5px;
         spacing: 7px;
 
@@ -171,12 +231,5 @@ export component MessageCard inherits Rectangle {
             }
         }
 
-        if message.duration-label != "": Text {
-            height: 14px;
-            text: "Worked for " + message.duration-label;
-            color: #777983;
-            font-size: 11px;
-            vertical-alignment: TextVerticalAlignment.center;
-        }
     }
 }
