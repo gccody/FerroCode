@@ -214,6 +214,8 @@ export component ConversationPane inherits Rectangle {
                         user-scroll-settle-timer.start();
                     }
                     for message in root.messages: MessageCard {
+                        width: conversation.content-width;
+                        x: (conversation.visible-width - self.width) / 2;
                         // Delegates are positioned in the ListView's content
                         // coordinates. Include the viewport translation when
                         // finding the row that currently crosses the top edge.
