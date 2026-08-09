@@ -1,7 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use codeagent_app::Controller;
-use codeagent_core::LocalStore;
+use ferro_code_app::Controller;
+use ferro_code_core::LocalStore;
 use slint::{ComponentHandle, Timer, TimerMode};
 use std::{
     cell::RefCell,

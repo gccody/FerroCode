@@ -2,8 +2,8 @@ use crate::{
     MainWindow, MarkdownBlock, MessageRow, ProjectRow, QuestionRow, ThreadRow, markdown_blocks,
     wrapped_line_count,
 };
-use codeagent_app::{AppState, Question};
-use codeagent_core::{ConversationItem, ItemKind};
+use ferro_code_app::{AppState, Question};
+use ferro_code_core::{ConversationItem, ItemKind};
 use slint::{Model, ModelRc, VecModel};
 use std::{
     collections::BTreeMap,

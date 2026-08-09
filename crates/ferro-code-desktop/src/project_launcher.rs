@@ -574,7 +574,7 @@ mod tests {
             false,
             false,
         );
-        let missing = std::env::temp_dir().join("codeagent-missing-project-folder");
+        let missing = std::env::temp_dir().join("ferro-code-missing-project-folder");
         let error = method.open(&missing).unwrap_err();
         assert!(error.starts_with("Project folder does not exist:"));
     }

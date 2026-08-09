@@ -1,4 +1,4 @@
-use codeagent_protocol::hidden_command;
+use ferro_code_protocol::hidden_command;
 use serde_json::Value;
 use std::process::Stdio;
 

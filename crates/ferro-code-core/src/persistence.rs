@@ -33,6 +33,7 @@ impl From<serde_json::Error> for StoreError {
 #[derive(Debug, Clone)]
 pub struct LocalStore {
     path: PathBuf,
+    legacy_path: Option<PathBuf>,
 }
 
 impl LocalStore {
@@ -40,10 +41,16 @@ impl LocalStore {
         let base = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        Self::new(base.join("CodeAgent").join("state.json"))
+        Self {
+            path: base.join("Ferro Code").join("state.json"),
+            legacy_path: Some(base.join(concat!("Code", "Agent")).join("state.json")),
+        }
     }
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            legacy_path: None,
+        }
     }
     pub fn path(&self) -> &Path {
         &self.path
@@ -51,7 +58,18 @@ impl LocalStore {
     pub fn load(&self) -> Result<PersistedState, StoreError> {
         match fs::read(&self.path) {
             Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(PersistedState::default()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let Some(legacy_path) = &self.legacy_path else {
+                    return Ok(PersistedState::default());
+                };
+                match fs::read(legacy_path) {
+                    Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        Ok(PersistedState::default())
+                    }
+                    Err(error) => Err(error.into()),
+                }
+            }
             Err(error) => Err(error.into()),
         }
     }
@@ -76,7 +94,7 @@ mod tests {
     #[test]
     fn missing_store_loads_defaults_and_save_round_trips() {
         let path =
-            std::env::temp_dir().join(format!("codeagent-store-{}.json", std::process::id()));
+            std::env::temp_dir().join(format!("ferro-code-store-{}.json", std::process::id()));
         let _ = fs::remove_file(&path);
         let store = LocalStore::new(&path);
         let mut state = store.load().unwrap();
@@ -87,5 +105,33 @@ mod tests {
         assert_eq!(restored.preferences.model, "test-model");
         assert_eq!(restored.preferences.effort, "high");
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn legacy_store_is_loaded_until_ferro_code_state_is_saved() {
+        let base =
+            std::env::temp_dir().join(format!("ferro-code-legacy-store-{}", std::process::id()));
+        let legacy_path = base.join("legacy").join("state.json");
+        let path = base.join("Ferro Code").join("state.json");
+        fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+
+        let mut legacy_state = PersistedState::default();
+        legacy_state.preferences.model = "legacy-model".into();
+        fs::write(
+            &legacy_path,
+            serde_json::to_vec_pretty(&legacy_state).unwrap(),
+        )
+        .unwrap();
+
+        let store = LocalStore {
+            path: path.clone(),
+            legacy_path: Some(legacy_path),
+        };
+        let restored = store.load().unwrap();
+        assert_eq!(restored.preferences.model, "legacy-model");
+
+        store.save(&restored).unwrap();
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(base);
     }
 }

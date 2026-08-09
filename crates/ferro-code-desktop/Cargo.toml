@@ -1,5 +1,5 @@
 [package]
-name = "codeagent"
+name = "ferro-code"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,8 @@ build = "build.rs"
 
 [dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
-codeagent-app.workspace = true
-codeagent-core.workspace = true
+ferro-code-app.workspace = true
+ferro-code-core.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 slint.workspace = true
 rfd = { version = "0.15", default-features = false }
@@ -34,5 +34,5 @@ slint-build.workspace = true
 winresource = "0.1"
 
 [[bin]]
-name = "codeagent"
+name = "ferro-code"
 path = "src/main.rs"

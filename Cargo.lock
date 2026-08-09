@@ -682,49 +682,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codeagent"
-version = "0.2.0"
-dependencies = [
- "arboard",
- "clipboard-win",
- "codeagent-app",
- "codeagent-core",
- "image",
- "rfd",
- "slint",
- "slint-build",
- "tempfile",
- "windows",
- "winresource",
-]
-
-[[package]]
-name = "codeagent-app"
-version = "0.2.0"
-dependencies = [
- "codeagent-core",
- "codeagent-protocol",
- "crossbeam-channel",
- "serde_json",
-]
-
-[[package]]
-name = "codeagent-core"
-version = "0.2.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "codeagent-protocol"
-version = "0.2.0"
-dependencies = [
- "crossbeam-channel",
- "serde_json",
-]
-
-[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1194,6 +1151,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
+]
+
+[[package]]
+name = "ferro-code"
+version = "0.2.0"
+dependencies = [
+ "arboard",
+ "clipboard-win",
+ "ferro-code-app",
+ "ferro-code-core",
+ "image",
+ "rfd",
+ "slint",
+ "slint-build",
+ "tempfile",
+ "windows",
+ "winresource",
+]
+
+[[package]]
+name = "ferro-code-app"
+version = "0.2.0"
+dependencies = [
+ "crossbeam-channel",
+ "ferro-code-core",
+ "ferro-code-protocol",
+ "serde_json",
+]
+
+[[package]]
+name = "ferro-code-core"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ferro-code-protocol"
+version = "0.2.0"
+dependencies = [
+ "crossbeam-channel",
+ "serde_json",
 ]
 
 [[package]]

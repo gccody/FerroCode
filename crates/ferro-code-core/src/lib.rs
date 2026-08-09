@@ -1,4 +1,4 @@
-//! UI-independent domain types and durable local state for CodeAgent.
+//! UI-independent domain types and durable local state for Ferro Code.
 
 mod formatting;
 mod model;

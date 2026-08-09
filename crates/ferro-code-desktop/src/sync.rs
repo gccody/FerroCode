@@ -3,8 +3,8 @@ use crate::{
     message_rows, model, project_rows_match, question_row, sync_message_rows, thread_rows,
     thread_rows_match,
 };
-use codeagent_app::{AppState, Controller};
-use codeagent_core::{ApprovalChoice, SandboxChoice, format_token_count, short_path};
+use ferro_code_app::{AppState, Controller};
+use ferro_code_core::{ApprovalChoice, SandboxChoice, format_token_count, short_path};
 use slint::SharedString;
 use std::collections::{BTreeMap, HashSet};
 

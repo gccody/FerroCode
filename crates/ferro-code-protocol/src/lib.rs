@@ -152,7 +152,7 @@ mod tests {
     #[ignore = "requires an installed and configured Codex CLI"]
     fn real_codex_app_server_handshake() {
         let backend = CodexBackend::spawn().expect("start configured Codex CLI");
-        backend.send(json!({"method":"initialize","id":1,"params":{"clientInfo":{"name":"codeagent_test","title":"CodeAgent Test","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}})).unwrap();
+        backend.send(json!({"method":"initialize","id":1,"params":{"clientInfo":{"name":"ferro_code_test","title":"Ferro Code Test","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}})).unwrap();
         assert!(wait_for_id(&backend, 1).get("result").is_some());
     }
 

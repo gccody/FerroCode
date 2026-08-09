@@ -1,4 +1,4 @@
-use codeagent_protocol::hidden_command;
+use ferro_code_protocol::hidden_command;
 use std::{fs, path::Path};
 
 pub(crate) fn inspect(root: &str, respect_gitignore: bool) -> (String, Vec<String>) {
@@ -94,7 +94,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "codeagent-gitignore-{}-{nonce}",
+            "ferro-code-gitignore-{}-{nonce}",
             std::process::id()
         ));
         fs::create_dir_all(root.join("ignored")).unwrap();

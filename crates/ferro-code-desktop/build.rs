@@ -6,6 +6,8 @@ fn main() {
         println!("cargo:rerun-if-changed=assets/app-icon.ico");
         winresource::WindowsResource::new()
             .set_icon("assets/app-icon.ico")
+            .set("ProductName", "Ferro Code")
+            .set("FileDescription", "Ferro Code")
             .compile()
             .expect("embed Windows application icon");
     }
