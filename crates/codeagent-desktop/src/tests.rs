@@ -312,6 +312,7 @@ fn thread_rows_include_all_projects_and_map_sidebar_state() {
     assert_eq!(rows[0].id.as_str(), second_thread);
     assert_eq!(rows[0].project_id.as_str(), second_project);
     assert_eq!(rows[0].subtitle.as_str(), "2 messages");
+    assert!(!rows[0].age_label.is_empty());
     assert!(rows[0].active);
     assert!(rows[0].busy);
     assert_eq!(rows[0].project_index, 0);
@@ -329,6 +330,16 @@ fn thread_rows_include_all_projects_and_map_sidebar_state() {
     let filtered = thread_rows(&state, "  nEwEsT  ");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].id.as_str(), second_thread);
+}
+
+#[test]
+fn relative_thread_ages_use_compact_sidebar_labels() {
+    assert_eq!(relative_time_label(1_000, 1_000), "now");
+    assert_eq!(relative_time_label(1_000, 1_059), "now");
+    assert_eq!(relative_time_label(1_000, 1_060), "1m ago");
+    assert_eq!(relative_time_label(1_000, 8_200), "2h ago");
+    assert_eq!(relative_time_label(1_000, 260_200), "3d ago");
+    assert_eq!(relative_time_label(2_000, 1_000), "now");
 }
 
 #[test]

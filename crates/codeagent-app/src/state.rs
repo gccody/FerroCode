@@ -371,10 +371,12 @@ impl AppState {
                 messages[final_answer].duration_ms = Some(duration_ms);
             }
         }
-        if self.active_local_thread.as_deref() != Some(id)
-            && let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == id)
-        {
-            thread.unread_completion = true;
+        if let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == id) {
+            let completed_at = i64::try_from(now_ms / 1_000).unwrap_or(i64::MAX);
+            thread.updated_at = thread.updated_at.max(completed_at);
+            if self.active_local_thread.as_deref() != Some(id) {
+                thread.unread_completion = true;
+            }
         }
     }
 

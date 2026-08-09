@@ -119,6 +119,7 @@ export component Sidebar inherits Rectangle {
                             private property <bool> shown: thread.project-id == project.id
                                 && !project.collapsed
                                 && (root.show-all-threads || thread.project-index < root.visible-thread-limit);
+                            private property <bool> has-accessory: thread.active || thread.busy || thread.completed-unread;
                             visible: self.shown;
                             height: self.shown ? 42px : 0px;
                             x: 17px;
@@ -126,7 +127,24 @@ export component Sidebar inherits Rectangle {
                             border-radius: 7px;
                             background: thread.active ? #202126 : thread-touch.has-hover ? #18191c : transparent;
                             Rectangle { x: -9px; width: 1px; height: parent.height; background: #303138; }
-                            Text { x: 20px; width: parent.width - ((thread.active || thread.busy || thread.completed-unread) ? 48px : 28px); text: thread.title; color: thread.active ? #f0f0f2 : #9a9ca4; font-size: 12px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                            Text {
+                                x: 20px;
+                                width: parent.width - 20px - (thread.age-label == "" ? (parent.has-accessory ? 38px : 8px) : (parent.has-accessory ? 94px : 64px));
+                                text: thread.title;
+                                color: thread.active ? #f0f0f2 : #9a9ca4;
+                                font-size: 12px;
+                                vertical-alignment: TextVerticalAlignment.center;
+                                overflow: elide;
+                            }
+                            if thread.age-label != "": Text {
+                                x: parent.width - (parent.has-accessory ? 88px : 58px);
+                                width: 50px;
+                                text: thread.age-label;
+                                color: #686a72;
+                                font-size: 10px;
+                                horizontal-alignment: TextHorizontalAlignment.right;
+                                vertical-alignment: TextVerticalAlignment.center;
+                            }
                             if thread.busy: WorkingMark { x: parent.width - 24px; y: 13px; }
                             if thread.completed-unread && !thread.busy: CompletedMark { x: parent.width - 22px; y: 14px; }
                             thread-touch := TouchArea { mouse-cursor: pointer; clicked => { root.open-thread(thread.id); } }

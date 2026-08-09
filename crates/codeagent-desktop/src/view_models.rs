@@ -5,7 +5,10 @@ use crate::{
 use codeagent_app::{AppState, Question};
 use codeagent_core::{ConversationItem, ItemKind};
 use slint::{Model, ModelRc, VecModel};
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 pub(super) fn context_ring_path(percent: u32) -> String {
     let percent = percent.min(100);
@@ -78,7 +81,39 @@ pub(super) fn elapsed_duration_label(duration_ms: u64) -> String {
     }
 }
 
+pub(super) fn relative_time_label(timestamp: i64, now: i64) -> String {
+    let elapsed = now.saturating_sub(timestamp).max(0) as u64;
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+    const MONTH: u64 = 30 * DAY;
+    const YEAR: u64 = 365 * DAY;
+
+    if elapsed < MINUTE {
+        "now".into()
+    } else if elapsed < HOUR {
+        format!("{}m ago", elapsed / MINUTE)
+    } else if elapsed < DAY {
+        format!("{}h ago", elapsed / HOUR)
+    } else if elapsed < MONTH {
+        format!("{}d ago", elapsed / DAY)
+    } else if elapsed < YEAR {
+        format!("{}mo ago", elapsed / MONTH)
+    } else {
+        format!("{}y ago", elapsed / YEAR)
+    }
+}
+
 pub(super) fn thread_rows(state: &AppState, search: &str) -> Vec<ThreadRow> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .min(i64::MAX as u64) as i64;
+    thread_rows_at(state, search, now)
+}
+
+fn thread_rows_at(state: &AppState, search: &str, now: i64) -> Vec<ThreadRow> {
     let search = search.trim().to_lowercase();
     let mut threads = state
         .threads
@@ -100,6 +135,12 @@ pub(super) fn thread_rows(state: &AppState, search: &str) -> Vec<ThreadRow> {
                     thread.messages.len(),
                     if thread.messages.len() == 1 { "" } else { "s" }
                 )
+                .into(),
+                age_label: if thread.messages.is_empty() {
+                    String::new()
+                } else {
+                    relative_time_label(thread.updated_at, now)
+                }
                 .into(),
                 active: state.active_local_thread.as_deref() == Some(&thread.id),
                 busy: state.running_turns.contains_key(&thread.id),
@@ -134,6 +175,7 @@ pub(super) fn thread_rows_match(current: &ModelRc<ThreadRow>, next: &[ThreadRow]
                     && current.project_id == next.project_id
                     && current.title == next.title
                     && current.subtitle == next.subtitle
+                    && current.age_label == next.age_label
                     && current.active == next.active
                     && current.busy == next.busy
                     && current.completed_unread == next.completed_unread
