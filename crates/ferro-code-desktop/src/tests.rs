@@ -210,7 +210,9 @@ fn file_rows_form_a_directory_first_tree_and_preserve_changed_files() {
         "src\\lib.rs".into(),
         "tests\\app.rs".into(),
     ];
-    let changed = HashSet::from(["src\\main.rs".into()]);
+    // Git always reports forward slashes while filesystem inspection uses the
+    // host separator. The tree must match either representation on every OS.
+    let changed = HashSet::from(["src/main.rs".into()]);
 
     let rows = file_rows(&paths, &changed);
     let summary = rows

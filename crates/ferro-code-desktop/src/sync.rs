@@ -1,7 +1,7 @@
 use crate::{
     MainWindow, ProjectRow, change_rows, context_ring_path, file_rows, message_content_height,
-    message_rows, model, project_rows_match, question_row, sync_message_rows, thread_rows,
-    thread_rows_match,
+    message_rows, model, normalize_repo_path, project_rows_match, question_row, sync_message_rows,
+    thread_rows, thread_rows_match,
 };
 use ferro_code_app::{AppState, Controller};
 use ferro_code_core::{ApprovalChoice, SandboxChoice, format_token_count, short_path};
@@ -124,7 +124,7 @@ pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     let changes = change_rows(&state.git_diff);
     let changed = changes
         .iter()
-        .map(|change| change.path.to_string().replace('/', "\\"))
+        .map(|change| normalize_repo_path(&change.path))
         .collect::<HashSet<_>>();
     ui.set_files(model(file_rows(&state.files, &changed)));
     ui.set_change_count(changes.len() as i32);

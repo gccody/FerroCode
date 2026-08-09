@@ -118,12 +118,17 @@ pub(super) fn file_rows(paths: &[String], changed: &HashSet<String>) -> Vec<File
         for directory in directories {
             node = node.directories.entry((*directory).to_owned()).or_default();
         }
-        node.files.insert((*file_name).to_owned(), path.clone());
+        node.files
+            .insert((*file_name).to_owned(), normalize_repo_path(path));
     }
 
     let mut rows = Vec::new();
     append_file_rows(&root, 0, changed, &mut rows);
     rows
+}
+
+pub(super) fn normalize_repo_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 pub(super) fn append_file_rows(
