@@ -27,7 +27,33 @@ use sync::*;
 use view_models::*;
 use workspace_view::*;
 
+#[cfg(windows)]
+fn select_windows_backend() -> Result<(), slint::PlatformError> {
+    use slint::winit_030::winit::platform::windows::WindowAttributesExtWindows;
+
+    let pixels = image::load_from_memory_with_format(
+        include_bytes!("../assets/app-icon.png"),
+        image::ImageFormat::Png,
+    )
+    .expect("decode embedded application icon")
+    .into_rgba8();
+    let (width, height) = pixels.dimensions();
+    let taskbar_icon =
+        slint::winit_030::winit::window::Icon::from_rgba(pixels.into_raw(), width, height)
+            .expect("create Windows taskbar icon");
+
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .with_winit_window_attributes_hook(move |attributes| {
+            attributes.with_taskbar_icon(Some(taskbar_icon.clone()))
+        })
+        .select()
+}
+
 fn main() -> Result<(), slint::PlatformError> {
+    #[cfg(windows)]
+    select_windows_backend()?;
+
     let store = LocalStore::discover();
     let persisted = store.load().unwrap_or_default();
     let controller = Rc::new(RefCell::new(Controller::new(persisted)));
