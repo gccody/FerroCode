@@ -5,6 +5,7 @@
 // height estimate supplied for the whole conversation.
 export component ListView inherits Rectangle {
     in property <bool> enabled: true;
+    in property <length> content-width: root.width;
     out property <length> visible-width <=> flickable.width;
     out property <length> visible-height <=> flickable.height;
     in-out property <length> viewport-width <=> flickable.viewport-width;
@@ -27,7 +28,8 @@ export component ListView inherits Rectangle {
     accessible-orientation: Orientation.vertical;
 
     flickable := Flickable {
-        width: parent.width;
+        x: (parent.width - self.width) / 2;
+        width: min(parent.width, root.content-width);
         height: parent.height;
         interactive: false;
         @children

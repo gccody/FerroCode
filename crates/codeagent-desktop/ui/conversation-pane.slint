@@ -196,9 +196,9 @@ export component ConversationPane inherits Rectangle {
             Rectangle {
                 visible: root.messages.length > 0;
                 conversation := ListView {
-                    x: max(16px, (parent.width - 850px) / 2);
-                    width: min(parent.width - 32px, 850px);
+                    width: parent.width;
                     height: parent.height;
+                    content-width: min(parent.width - 32px, 850px);
                     content-height: root.message-content-height;
                     scroll-offset <=> root.stable-scroll-offset;
                     scrolled => {
