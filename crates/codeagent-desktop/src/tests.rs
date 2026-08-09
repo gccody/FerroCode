@@ -87,6 +87,24 @@ fn explicit_lines_and_wrapping_increase_message_row_height() {
 }
 
 #[test]
+fn conversation_height_estimates_expanded_activity_body() {
+    let mut command = ConversationItem::new("command", ItemKind::Command, "Command");
+    command.collapsed = false;
+    command.body = "output line\n".repeat(200);
+    let mut answer = ConversationItem::new("answer", ItemKind::Assistant, "Codex");
+    answer.body = "Done".into();
+
+    let rows = message_rows(&[command, answer]);
+    let height = message_content_height(&rows);
+    let expanded_command_height = wrapped_line_count(&rows[0].body, 105) as f32 * 15.0 + 44.0;
+
+    assert_eq!(rows[0].scroll_offset, 0.0);
+    assert_eq!(rows[1].scroll_offset, expanded_command_height);
+    assert_eq!(height, expanded_command_height + rows[1].row_height);
+    assert!(expanded_command_height > rows[0].row_height);
+}
+
+#[test]
 fn completed_assistant_message_height_includes_the_copy_action() {
     let mut answer = ConversationItem::new("answer", ItemKind::Assistant, "Codex");
     answer.body = "x".repeat(113);

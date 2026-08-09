@@ -1,6 +1,6 @@
 use crate::{
-    MainWindow, PendingAttachment, clipboard_file_paths, pending_attachment, sync_attachment_ui,
-    sync_ui,
+    MainWindow, OpenMethod, PendingAttachment, clipboard_file_paths, pending_attachment,
+    sync_attachment_ui, sync_ui,
 };
 use codeagent_app::Controller;
 use codeagent_core::{ApprovalChoice, SandboxChoice};
@@ -42,6 +42,7 @@ pub(super) fn wire_callbacks(
     search: &Rc<RefCell<String>>,
     attachments: &Rc<RefCell<Vec<PendingAttachment>>>,
     attachment_temp_dir: &Rc<Option<tempfile::TempDir>>,
+    open_methods: &Rc<Vec<OpenMethod>>,
 ) {
     let weak = ui.as_weak();
     let controller_ref = controller.clone();
@@ -57,6 +58,54 @@ pub(super) fn wire_callbacks(
             if let Some(ui) = weak.upgrade() {
                 sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
             }
+        }
+    });
+
+    let weak = ui.as_weak();
+    let controller_ref = controller.clone();
+    let open_methods_ref = open_methods.clone();
+    ui.on_open_project(move |label| {
+        let project_path = controller_ref
+            .borrow()
+            .state
+            .active_project
+            .as_ref()
+            .and_then(|id| {
+                controller_ref
+                    .borrow()
+                    .state
+                    .projects
+                    .iter()
+                    .find(|project| &project.id == id)
+                    .map(|project| project.path.clone())
+            });
+        let result = project_path
+            .ok_or_else(|| "Select a project before opening it".to_owned())
+            .and_then(|path| {
+                open_methods_ref
+                    .iter()
+                    .find(|method| label == method.label())
+                    .ok_or_else(|| format!("{} is not available on this machine", label))
+                    .and_then(|method| method.open(std::path::Path::new(&path)))
+            });
+
+        if let Some(ui) = weak.upgrade() {
+            match result {
+                Ok(()) => {
+                    ui.set_toast_text(format!("Opened project in {label}").into());
+                    ui.set_toast_error(false);
+                }
+                Err(error) => {
+                    ui.set_toast_text(error.into());
+                    ui.set_toast_error(true);
+                }
+            }
+            let clear_weak = weak.clone();
+            Timer::single_shot(Duration::from_secs(2), move || {
+                if let Some(ui) = clear_weak.upgrade() {
+                    ui.set_toast_text("".into());
+                }
+            });
         }
     });
 

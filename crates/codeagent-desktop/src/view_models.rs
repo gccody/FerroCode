@@ -254,6 +254,23 @@ pub(super) fn message_rows_match(current: &MessageRow, next: &MessageRow) -> boo
         && current.response_id == next.response_id
         && current.duration_label == next.duration_label
         && current.row_height == next.row_height
+        && current.scroll_offset == next.scroll_offset
+}
+
+fn message_scroll_height(row: &MessageRow) -> f32 {
+    if row.activity && !row.collapsed && !row.body.is_empty() {
+        // Expanded activity delegates use rendered text metrics. This
+        // estimate covers explicit lines and wrapping without forcing
+        // the ListView to instantiate every off-screen delegate.
+        let characters_per_line = if row.kind == "command" { 105 } else { 112 };
+        wrapped_line_count(&row.body, characters_per_line) as f32 * 15.0 + 44.0
+    } else {
+        row.row_height
+    }
+}
+
+pub(super) fn message_content_height(rows: &[MessageRow]) -> f32 {
+    rows.iter().map(message_scroll_height).sum()
 }
 
 pub(super) fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
@@ -313,6 +330,11 @@ pub(super) fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
         }
         index = response_end;
     }
+    let mut scroll_offset = 0.0;
+    for row in &mut rows {
+        row.scroll_offset = scroll_offset;
+        scroll_offset += message_scroll_height(row);
+    }
     rows
 }
 
@@ -348,6 +370,7 @@ fn message_row(item: &ConversationItem) -> MessageRow {
             .unwrap_or_default()
             .into(),
         row_height,
+        scroll_offset: 0.0,
     }
 }
 
@@ -370,6 +393,7 @@ fn response_summary_row(final_answer: &ConversationItem) -> MessageRow {
         response_id: final_answer.id.clone().into(),
         duration_label: duration_label.into(),
         row_height: 48.0,
+        scroll_offset: 0.0,
     }
 }
 
