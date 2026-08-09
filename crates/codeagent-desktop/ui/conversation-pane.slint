@@ -212,7 +212,10 @@ export component ConversationPane inherits Rectangle {
                         user-scroll-settle-timer.stop();
                         user-scroll-settle-timer.start();
                     }
-                    for message[index] in root.messages: MessageCard {
+                    for message in root.messages: MessageCard {
+                        // Delegates are positioned in the ListView's content
+                        // coordinates. Include the viewport translation when
+                        // finding the row that currently crosses the top edge.
                         private property <length> screen-y: self.y + conversation.viewport-y;
                         private property <length> reported-scroll-offset: message.scroll-offset - self.screen-y;
                         changed reported-scroll-offset => {
