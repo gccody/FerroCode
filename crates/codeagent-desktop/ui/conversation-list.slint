@@ -67,13 +67,11 @@ export component ListView inherits Rectangle {
             height: parent.height;
             mouse-cursor: pointer;
 
-            private property <length> pressed-viewport-y: 0px;
             private property <length> pressed-scroll-offset: 0px;
             private property <length> pressed-mouse-y: 0px;
 
             pointer-event(event) => {
                 if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                    self.pressed-viewport-y = root.viewport-y;
                     self.pressed-scroll-offset = root.scroll-offset;
                     self.pressed-mouse-y = self.mouse-y;
                 }
