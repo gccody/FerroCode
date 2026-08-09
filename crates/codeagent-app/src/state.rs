@@ -111,18 +111,9 @@ impl AppState {
     pub fn apply_history(&mut self, mut history: AppHistory) {
         for thread in &mut history.threads {
             thread.agent.fill_missing_from(&self.prefs);
-            for item in &mut thread.messages {
-                if item.status != "running"
-                    && matches!(
-                        item.kind,
-                        codeagent_core::ItemKind::Command
-                            | codeagent_core::ItemKind::Tool
-                            | codeagent_core::ItemKind::FileChange
-                            | codeagent_core::ItemKind::Plan
-                    )
-                {
-                    item.collapsed = true;
-                }
+            if !thread.response_group_collapse_initialized {
+                initialize_response_collapse_state(&mut thread.messages);
+                thread.response_group_collapse_initialized = true;
             }
         }
         let active_project = history
@@ -343,6 +334,7 @@ impl AppState {
             messages: Vec::new(),
             context_usage: None,
             unread_completion: false,
+            response_group_collapse_initialized: true,
             agent: ThreadAgentSettings::from_preferences(&self.prefs),
         });
         self.active_local_thread = Some(id.clone());
@@ -354,29 +346,29 @@ impl AppState {
 
     pub fn finish_turn(&mut self, id: &str, now_ms: u64) {
         self.running_turns.remove(id);
-        if let Some(duration_ms) = self
+        let duration_ms = self
             .turn_started_at_ms
             .remove(id)
-            .map(|started_at| now_ms.saturating_sub(started_at))
+            .map(|started_at| now_ms.saturating_sub(started_at));
+        let messages = if self.active_local_thread.as_deref() == Some(id) {
+            Some(&mut self.conversation)
+        } else {
+            self.threads
+                .iter_mut()
+                .find(|thread| thread.id == id)
+                .map(|thread| &mut thread.messages)
+        };
+        if let Some(messages) = messages
+            && let Some(last_user) = messages
+                .iter()
+                .rposition(|item| item.kind == codeagent_core::ItemKind::User)
         {
-            let messages = if self.active_local_thread.as_deref() == Some(id) {
-                Some(&mut self.conversation)
-            } else {
-                self.threads
-                    .iter_mut()
-                    .find(|thread| thread.id == id)
-                    .map(|thread| &mut thread.messages)
-            };
-            if let Some(messages) = messages
-                && let Some(last_user) = messages
-                    .iter()
-                    .rposition(|item| item.kind == codeagent_core::ItemKind::User)
-                && let Some(answer) = messages[last_user + 1..]
-                    .iter_mut()
-                    .rev()
-                    .find(|item| item.kind == codeagent_core::ItemKind::Assistant)
-            {
-                answer.duration_ms = Some(duration_ms);
+            let response_start = last_user + 1;
+            let response_end = messages.len();
+            let final_answer = collapse_response_details(messages, response_start, response_end);
+
+            if let (Some(duration_ms), Some(final_answer)) = (duration_ms, final_answer) {
+                messages[final_answer].duration_ms = Some(duration_ms);
             }
         }
         if self.active_local_thread.as_deref() != Some(id)
@@ -384,6 +376,38 @@ impl AppState {
         {
             thread.unread_completion = true;
         }
+    }
+
+    pub fn toggle_message(&mut self, id: &str) -> bool {
+        let Some(item) = self.conversation.iter_mut().find(|item| {
+            item.id == id
+                && matches!(
+                    item.kind,
+                    codeagent_core::ItemKind::Command
+                        | codeagent_core::ItemKind::Tool
+                        | codeagent_core::ItemKind::FileChange
+                        | codeagent_core::ItemKind::Plan
+                        | codeagent_core::ItemKind::System
+                )
+        }) else {
+            return false;
+        };
+        item.collapsed = !item.collapsed;
+        self.touch();
+        true
+    }
+
+    pub fn toggle_response_details(&mut self, id: &str) -> bool {
+        let Some(item) = self
+            .conversation
+            .iter_mut()
+            .find(|item| item.id == id && item.kind == codeagent_core::ItemKind::Assistant)
+        else {
+            return false;
+        };
+        item.response_details_collapsed = !item.response_details_collapsed;
+        self.touch();
+        true
     }
 
     pub fn archive_thread(&mut self, id: &str) -> bool {
@@ -439,6 +463,55 @@ impl AppState {
             is_error: false,
         });
         self.touch();
+    }
+}
+
+fn collapse_response_details(
+    messages: &mut [ConversationItem],
+    response_start: usize,
+    response_end: usize,
+) -> Option<usize> {
+    let final_answer = messages[response_start..response_end]
+        .iter()
+        .rposition(|item| item.kind == codeagent_core::ItemKind::Assistant)
+        .map(|index| response_start + index);
+    if let Some(final_answer) = final_answer {
+        for item in &mut messages[response_start..response_end] {
+            item.response_details_collapsed = false;
+            item.collapsed = matches!(
+                item.kind,
+                codeagent_core::ItemKind::Command
+                    | codeagent_core::ItemKind::Tool
+                    | codeagent_core::ItemKind::FileChange
+                    | codeagent_core::ItemKind::Plan
+                    | codeagent_core::ItemKind::System
+            );
+        }
+        messages[final_answer].response_details_collapsed = true;
+    }
+
+    final_answer
+}
+
+fn initialize_response_collapse_state(messages: &mut [ConversationItem]) {
+    let user_indexes = messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| (item.kind == codeagent_core::ItemKind::User).then_some(index))
+        .collect::<Vec<_>>();
+
+    for (position, user_index) in user_indexes.iter().copied().enumerate() {
+        let response_start = user_index + 1;
+        let response_end = user_indexes
+            .get(position + 1)
+            .copied()
+            .unwrap_or(messages.len());
+        let completed = messages[response_start..response_end].iter().any(|item| {
+            item.kind == codeagent_core::ItemKind::Assistant && item.duration_ms.is_some()
+        });
+        if completed {
+            collapse_response_details(messages, response_start, response_end);
+        }
     }
 }
 
@@ -690,6 +763,84 @@ mod tests {
 
         assert_eq!(state.conversation[1].duration_ms, Some(2_450));
         assert_eq!(state.conversation[3].duration_ms, Some(5_125));
+    }
+
+    #[test]
+    fn finishing_a_turn_collapses_intermediate_response_messages_only() {
+        let mut state = state();
+        state.add_project(r"C:\Code\Demo".into(), 1);
+        let thread = state.new_thread(2).unwrap();
+
+        let user = ConversationItem::new("user", ItemKind::User, "You");
+        let reasoning = ConversationItem::new("reasoning", ItemKind::Reasoning, "Reasoning");
+        let commentary = ConversationItem::new("commentary", ItemKind::Assistant, "Codex");
+        let tool = ConversationItem::new("tool", ItemKind::Tool, "Search");
+        let final_answer = ConversationItem::new("final", ItemKind::Assistant, "Codex");
+        state
+            .conversation
+            .extend([user, reasoning, commentary, tool, final_answer]);
+        state.begin_turn(thread.clone(), 1_000);
+
+        state.finish_turn(&thread, 4_250);
+
+        assert!(!state.conversation[0].collapsed);
+        assert!(!state.conversation[1].collapsed);
+        assert!(!state.conversation[2].collapsed);
+        assert!(state.conversation[3].collapsed);
+        assert!(!state.conversation[4].collapsed);
+        assert!(state.conversation[4].response_details_collapsed);
+        assert_eq!(state.conversation[4].duration_ms, Some(3_250));
+    }
+
+    #[test]
+    fn activity_messages_can_be_expanded_and_collapsed_individually() {
+        let mut state = state();
+        state.add_project(r"C:\Code\Demo".into(), 1);
+        state.new_thread(2).unwrap();
+        state.conversation.extend([
+            ConversationItem::new("user", ItemKind::User, "You"),
+            ConversationItem::new("tool", ItemKind::Tool, "Search"),
+        ]);
+
+        assert!(!state.toggle_message("user"));
+        assert!(state.toggle_message("tool"));
+        assert!(state.conversation[1].collapsed);
+        assert!(state.toggle_message("tool"));
+        assert!(!state.conversation[1].collapsed);
+    }
+
+    #[test]
+    fn older_history_is_normalized_once_without_losing_later_user_choices() {
+        let mut state = state();
+        state.add_project(r"C:\Code\Demo".into(), 1);
+        state.new_thread(2).unwrap();
+        let mut final_answer = ConversationItem::new("final", ItemKind::Assistant, "Codex");
+        final_answer.status = "completed".into();
+        final_answer.duration_ms = Some(2_000);
+        state.conversation.extend([
+            ConversationItem::new("user", ItemKind::User, "You"),
+            ConversationItem::new("commentary", ItemKind::Assistant, "Codex"),
+            ConversationItem::new("tool", ItemKind::Tool, "Search"),
+            final_answer,
+        ]);
+
+        let mut persisted = state.persisted();
+        persisted.history.threads[0].response_group_collapse_initialized = false;
+        let mut restored = AppState::from_persisted(persisted);
+
+        assert!(!restored.conversation[1].collapsed);
+        assert!(restored.conversation[2].collapsed);
+        assert!(!restored.conversation[3].collapsed);
+        assert!(restored.conversation[3].response_details_collapsed);
+        assert!(restored.threads[0].response_group_collapse_initialized);
+
+        assert!(restored.toggle_response_details("final"));
+        let mut reloaded = AppState::from_persisted(restored.persisted());
+        assert!(!reloaded.conversation[3].response_details_collapsed);
+
+        assert!(reloaded.toggle_response_details("final"));
+        let collapsed_again = AppState::from_persisted(reloaded.persisted());
+        assert!(collapsed_again.conversation[3].response_details_collapsed);
     }
 
     #[test]

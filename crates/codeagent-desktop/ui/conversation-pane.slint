@@ -35,6 +35,8 @@ export component ConversationPane inherits Rectangle {
     callback paste-image() -> bool;
     callback remove-attachment(int);
     callback copy-code(string);
+    callback toggle-message(string);
+    callback toggle-response-details(string);
     callback select-model(string);
     callback select-effort(string);
     callback select-sandbox(string);
@@ -47,6 +49,7 @@ export component ConversationPane inherits Rectangle {
         // ListView discovers variable-height delegates lazily. A few event-loop
         // passes let its estimated viewport height settle before the final seek.
         root.scroll-latest-attempts = root.active-thread-id == "" ? 0 : 3;
+        root.layout-settle-attempts = root.active-thread-id == "" ? 0 : 3;
     }
     private property <int> message-count: root.messages.length;
     changed message-count => {
@@ -59,13 +62,17 @@ export component ConversationPane inherits Rectangle {
         }
     }
     changed message-revision => {
-        if root.active-thread-id != "" && root.follow-latest {
-            root.scroll-latest-attempts = 3;
+        if root.active-thread-id != "" {
+            root.layout-settle-attempts = 3;
+            if root.follow-latest {
+                root.scroll-latest-attempts = 3;
+            }
         }
     }
 
     private property <bool> follow-latest: true;
     private property <int> scroll-latest-attempts: 0;
+    private property <int> layout-settle-attempts: 0;
     private property <bool> user-scroll-pending: false;
     private property <length> user-scroll-origin-y: 0px;
     scroll-latest-timer := Timer {
@@ -77,6 +84,19 @@ export component ConversationPane inherits Rectangle {
                 conversation.visible-height - conversation.viewport-height
             );
             root.scroll-latest-attempts -= 1;
+        }
+    }
+    layout-settle-timer := Timer {
+        interval: 1ms;
+        running: root.layout-settle-attempts > 0;
+        triggered => {
+            if !root.follow-latest {
+                conversation.viewport-y = max(
+                    min(0px, conversation.visible-height - conversation.viewport-height),
+                    min(0px, conversation.viewport-y)
+                );
+            }
+            root.layout-settle-attempts -= 1;
         }
     }
     user-scroll-settle-timer := Timer {
@@ -182,6 +202,8 @@ export component ConversationPane inherits Rectangle {
                     for message in root.messages: MessageCard {
                         message: message;
                         copy-code(text) => { root.copy-code(text); }
+                        toggle-message(id) => { root.toggle-message(id); }
+                        toggle-response-details(id) => { root.toggle-response-details(id); }
                     }
                 }
             }
