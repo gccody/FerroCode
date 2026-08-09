@@ -87,6 +87,18 @@ fn explicit_lines_and_wrapping_increase_message_row_height() {
 }
 
 #[test]
+fn completed_assistant_message_height_includes_the_copy_action() {
+    let mut answer = ConversationItem::new("answer", ItemKind::Assistant, "Codex");
+    answer.body = "x".repeat(113);
+    let streaming_height = message_height(&answer, &markdown_blocks(&answer));
+
+    answer.duration_ms = Some(1_000);
+    let completed_height = message_height(&answer, &markdown_blocks(&answer));
+
+    assert_eq!(completed_height - streaming_height, 35.0);
+}
+
+#[test]
 fn activity_items_use_compact_rows_and_past_tense_when_finished() {
     let mut command = ConversationItem::new("command", ItemKind::Command, "cargo test");
     command.status = "completed".into();
@@ -407,7 +419,23 @@ fn assistant_messages_are_rendered_as_markdown_and_user_text_stays_literal() {
         blocks[0].text,
         StyledText::from_markdown(&assistant.body).unwrap()
     );
+    assert_eq!(
+        blocks[0].raw_text.as_str(),
+        "Summary\n- first\n  * nested\n1. ordered\ninline code"
+    );
     assert!(markdown_blocks(&user).is_empty());
+}
+
+#[test]
+fn selectable_markdown_text_omits_formatting_and_link_destinations() {
+    assert_eq!(
+        markdown_plain_text("**Bold** [nested *label*](https://example.com) and 2 * 3"),
+        "Bold nested label and 2 * 3"
+    );
+    assert_eq!(
+        markdown_plain_text("file_name and ~~removed~~"),
+        "file_name and removed"
+    );
 }
 
 #[test]
@@ -442,6 +470,18 @@ fn gfm_tables_render_cells_without_the_delimiter_row() {
     let header = table.table_rows.row_data(0).unwrap();
     assert!(header.header);
     assert_eq!(header.cells.row_count(), 3);
+    assert_eq!(
+        table
+            .table_rows
+            .row_data(1)
+            .unwrap()
+            .cells
+            .row_data(1)
+            .unwrap()
+            .raw_text
+            .as_str(),
+        "Active"
+    );
     assert_eq!(header.cells.row_data(0).unwrap().alignment.as_str(), "left");
     assert_eq!(
         header.cells.row_data(1).unwrap().alignment.as_str(),

@@ -263,6 +263,31 @@ pub(super) fn wire_callbacks(
     });
 
     let weak = ui.as_weak();
+    ui.on_copy_response(move |text| {
+        let result = arboard::Clipboard::new()
+            .and_then(|mut clipboard| clipboard.set_text(text.to_string()));
+        if let Some(ui) = weak.upgrade() {
+            match result {
+                Ok(()) => {
+                    ui.set_toast_text("Response copied to clipboard".into());
+                    ui.set_toast_error(false);
+                }
+                Err(error) => {
+                    ui.set_toast_text(format!("Could not copy response: {error}").into());
+                    ui.set_toast_error(true);
+                }
+            }
+        }
+
+        let clear_weak = weak.clone();
+        Timer::single_shot(Duration::from_secs(2), move || {
+            if let Some(ui) = clear_weak.upgrade() {
+                ui.set_toast_text("".into());
+            }
+        });
+    });
+
+    let weak = ui.as_weak();
     let controller_ref = controller.clone();
     let search_ref = search.clone();
     ui.on_search_threads(move |value| {
