@@ -251,7 +251,7 @@ export component ConversationPane inherits Rectangle {
         }
 
         Rectangle {
-            height: composer-shell.height + 16px;
+            height: composer-shell.height + 10px;
             background: #0d0e10;
             border-width: 1px;
             border-color: #292a2f;
@@ -260,7 +260,7 @@ export component ConversationPane inherits Rectangle {
                 width: min(parent.width - 38px, 820px);
                 height: self.input-height + (root.attachments.length > 0 ? 135px : 57px);
                 x: (parent.width - self.width) / 2;
-                y: 8px;
+                y: 5px;
                 background: #17181d;
                 border-width: 1px;
                 border-color: #303138;

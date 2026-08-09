@@ -10,6 +10,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+pub(super) const MESSAGE_GAP: f32 = 10.0;
+
 pub(super) fn context_ring_path(percent: u32) -> String {
     let percent = percent.min(100);
     if percent == 0 {
@@ -258,7 +260,7 @@ pub(super) fn message_rows_match(current: &MessageRow, next: &MessageRow) -> boo
 }
 
 fn message_scroll_height(row: &MessageRow) -> f32 {
-    if row.activity && !row.collapsed && !row.body.is_empty() {
+    let content_height = if row.activity && !row.collapsed && !row.body.is_empty() {
         // Expanded activity delegates use rendered text metrics. This
         // estimate covers explicit lines and wrapping without forcing
         // the ListView to instantiate every off-screen delegate.
@@ -266,7 +268,8 @@ fn message_scroll_height(row: &MessageRow) -> f32 {
         wrapped_line_count(&row.body, characters_per_line) as f32 * 15.0 + 44.0
     } else {
         row.row_height
-    }
+    };
+    content_height + MESSAGE_GAP
 }
 
 pub(super) fn message_content_height(rows: &[MessageRow]) -> f32 {

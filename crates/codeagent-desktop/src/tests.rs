@@ -99,8 +99,11 @@ fn conversation_height_estimates_expanded_activity_body() {
     let expanded_command_height = wrapped_line_count(&rows[0].body, 105) as f32 * 15.0 + 44.0;
 
     assert_eq!(rows[0].scroll_offset, 0.0);
-    assert_eq!(rows[1].scroll_offset, expanded_command_height);
-    assert_eq!(height, expanded_command_height + rows[1].row_height);
+    assert_eq!(rows[1].scroll_offset, expanded_command_height + MESSAGE_GAP);
+    assert_eq!(
+        height,
+        expanded_command_height + rows[1].row_height + MESSAGE_GAP * 2.0
+    );
     assert!(expanded_command_height > rows[0].row_height);
 }
 
