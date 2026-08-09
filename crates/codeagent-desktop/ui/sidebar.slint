@@ -9,9 +9,13 @@ export component Sidebar inherits Rectangle {
     in property <[ProjectRow]> projects;
     in property <[ThreadRow]> threads;
     in-out property <bool> expanded: true;
+    in property <length> available-width: 1440px;
+    in-out property <length> expanded-width: 247px;
     in-out property <string> search-text: "";
     in property <int> visible-thread-limit: 5;
     in-out property <bool> show-all-threads: false;
+    private property <length> minimum-expanded-width: 150px;
+    private property <length> maximum-expanded-width: 600px;
 
     callback add-project;
     callback toggle-project(string);
@@ -21,7 +25,7 @@ export component Sidebar inherits Rectangle {
     callback search-threads(string);
     callback open-settings;
 
-    width: root.expanded ? 247px : 53px;
+    width: root.expanded ? root.expanded-width : 53px;
     background: #0f1012;
     border-width: 1px;
     border-color: #292a2f;
@@ -71,10 +75,10 @@ export component Sidebar inherits Rectangle {
 
             ScrollView {
                 vertical-stretch: 1;
-                viewport-width: 223px;
+                viewport-width: self.width;
                 horizontal-scrollbar-policy: always-off;
                 VerticalLayout {
-                    width: 223px;
+                    width: parent.width;
                     spacing: 2px;
                     for project in root.projects: VerticalLayout {
                         spacing: 1px;
@@ -123,7 +127,7 @@ export component Sidebar inherits Rectangle {
                             visible: self.shown;
                             height: self.shown ? 42px : 0px;
                             x: 17px;
-                            width: 206px;
+                            width: parent.width - 17px;
                             border-radius: 7px;
                             background: thread.active ? #202126 : thread-touch.has-hover ? #18191c : transparent;
                             Rectangle { x: -9px; width: 1px; height: parent.height; background: #303138; }
@@ -158,7 +162,7 @@ export component Sidebar inherits Rectangle {
                         if !project.collapsed && project.thread-count > root.visible-thread-limit: Rectangle {
                             height: 30px;
                             x: 17px;
-                            width: 206px;
+                            width: parent.width - 17px;
                             border-radius: 6px;
                             background: thread-list-toggle-touch.has-hover ? #1b1c20 : transparent;
                             Text {
@@ -205,6 +209,29 @@ export component Sidebar inherits Rectangle {
             collapsed-settings-touch := TouchArea {
                 mouse-cursor: pointer;
                 clicked => { root.open-settings(); }
+            }
+        }
+    }
+
+    if root.expanded: resize-handle := Rectangle {
+        x: parent.width - self.width;
+        width: 6px;
+        background: resize-touch.has-hover || resize-touch.pressed ? #6f5bd3 : transparent;
+        accessible-role: slider;
+        accessible-label: "Resize sidebar";
+
+        resize-touch := TouchArea {
+            mouse-cursor: ew-resize;
+            moved => {
+                if (self.pressed && root.available-width > 0px) {
+                    root.expanded-width = max(
+                        root.minimum-expanded-width,
+                        min(
+                            min(root.maximum-expanded-width, root.available-width - 400px),
+                            root.width + self.mouse-x - self.pressed-x,
+                        ),
+                    );
+                }
             }
         }
     }
