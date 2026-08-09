@@ -1,5 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
-import { AttachmentRow, ChangeRow, FileRow } from "types.slint";
+import { AttachmentRow, ChangeRow, FileRow, OpenMethodRow } from "types.slint";
 import { ComposerChevron, PaperclipMark } from "icons.slint";
 
 export component ContextIndicator inherits Rectangle {
@@ -353,7 +353,7 @@ export component ComposerComboBox inherits Rectangle {
 }
 
 export component OpenProjectButton inherits Rectangle {
-    in property <[string]> methods;
+    in property <[OpenMethodRow]> methods;
     in property <bool> enabled: true;
     callback selected(string);
 
@@ -422,10 +422,18 @@ export component OpenProjectButton inherits Rectangle {
                         height: 32px;
                         border-radius: 5px;
                         background: method-touch.has-hover ? #35363c : transparent;
+                        if method.has-icon: Image {
+                            x: 9px;
+                            y: (parent.height - self.height) / 2;
+                            width: 18px;
+                            height: 18px;
+                            source: method.icon;
+                            image-fit: contain;
+                        }
                         Text {
-                            x: 10px;
-                            width: parent.width - 20px;
-                            text: method;
+                            x: method.has-icon ? 35px : 10px;
+                            width: parent.width - self.x - 10px;
+                            text: method.label;
                             color: #f0f0f2;
                             font-size: 12px;
                             vertical-alignment: TextVerticalAlignment.center;
@@ -434,7 +442,7 @@ export component OpenProjectButton inherits Rectangle {
                         method-touch := TouchArea {
                             mouse-cursor: pointer;
                             clicked => {
-                                root.selected(method);
+                                root.selected(method.label);
                                 open-popup.close();
                             }
                         }

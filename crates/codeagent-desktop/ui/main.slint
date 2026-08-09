@@ -1,5 +1,5 @@
 import {
-    AttachmentRow, ChangeRow, FileRow, MessageRow, ProjectRow, QuestionRow, ThreadRow,
+    AttachmentRow, ChangeRow, FileRow, MessageRow, OpenMethodRow, ProjectRow, QuestionRow, ThreadRow,
 } from "types.slint";
 import { AppHeader, UpdateBanner } from "app-chrome.slint";
 import { ConversationPane } from "conversation-pane.slint";
@@ -28,7 +28,7 @@ export component MainWindow inherits Window {
     in property <[string]> effort-names;
     in property <[string]> sandbox-names;
     in property <[string]> approval-names;
-    in property <[string]> open-project-methods;
+    in property <[OpenMethodRow]> open-project-methods;
     in property <string> connection-text: "Starting Codex...";
     in property <bool> connected: false;
     in-out property <bool> startup-loading: true;

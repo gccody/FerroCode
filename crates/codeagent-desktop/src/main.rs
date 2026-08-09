@@ -34,11 +34,14 @@ fn main() -> Result<(), slint::PlatformError> {
     controller.borrow_mut().start();
     let ui = MainWindow::new()?;
     let open_methods = Rc::new(available_open_methods());
-    ui.set_open_project_methods(model(
-        open_methods
-            .iter()
-            .map(|method| slint::SharedString::from(method.label())),
-    ));
+    ui.set_open_project_methods(model(open_methods.iter().map(|method| {
+        let icon = method.icon();
+        OpenMethodRow {
+            label: method.label().into(),
+            has_icon: icon.is_some(),
+            icon: icon.unwrap_or_default(),
+        }
+    })));
     install_input_focus_dismissal(&ui);
     let search = Rc::new(RefCell::new(String::new()));
     let attachments = Rc::new(RefCell::new(Vec::<PendingAttachment>::new()));

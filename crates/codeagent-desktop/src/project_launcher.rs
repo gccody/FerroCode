@@ -34,6 +34,10 @@ impl OpenMethod {
         &self.label
     }
 
+    pub(super) fn icon(&self) -> Option<slint::Image> {
+        executable_icon(&self.program)
+    }
+
     pub(super) fn open(&self, project_path: &Path) -> Result<(), String> {
         if !project_path.is_dir() {
             return Err(format!(
@@ -55,6 +59,155 @@ impl OpenMethod {
             .map(|_| ())
             .map_err(|error| format!("Could not open project in {}: {error}", self.label))
     }
+}
+
+#[cfg(windows)]
+fn executable_icon(program: &Path) -> Option<slint::Image> {
+    use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+    use std::{iter, os::windows::ffi::OsStrExt};
+    use windows::{
+        Win32::{
+            Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
+            UI::{
+                Shell::{SHFILEINFOW, SHGFI_ICON, SHGetFileInfoW},
+                WindowsAndMessaging::DestroyIcon,
+            },
+        },
+        core::PCWSTR,
+    };
+
+    const ICON_SIZE: u32 = 32;
+    let normalized_program = OsString::from(program.to_string_lossy().replace('/', "\\"));
+    let wide_path = normalized_program
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    let mut file_info = SHFILEINFOW::default();
+    let result = unsafe {
+        SHGetFileInfoW(
+            PCWSTR(wide_path.as_ptr()),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut file_info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON,
+        )
+    };
+    if result == 0 || file_info.hIcon.0.is_null() {
+        return None;
+    }
+
+    let pixels = unsafe { hicon_rgba(file_info.hIcon, ICON_SIZE) };
+    let _ = unsafe { DestroyIcon(file_info.hIcon) };
+    pixels.map(|pixels| {
+        let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+            pixels.as_slice(),
+            ICON_SIZE,
+            ICON_SIZE,
+        );
+        Image::from_rgba8_premultiplied(buffer)
+    })
+}
+
+#[cfg(windows)]
+unsafe fn hicon_rgba(
+    icon: windows::Win32::UI::WindowsAndMessaging::HICON,
+    size: u32,
+) -> Option<Vec<u8>> {
+    use windows::Win32::{
+        Graphics::Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection,
+            DIB_RGB_COLORS, DeleteDC, DeleteObject, HGDIOBJ, SelectObject,
+        },
+        UI::WindowsAndMessaging::{DI_NORMAL, DrawIconEx},
+    };
+
+    let memory_dc = unsafe { CreateCompatibleDC(None) };
+    if memory_dc.0.is_null() {
+        return None;
+    }
+
+    let bitmap_info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: size as i32,
+            biHeight: -(size as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut bits = std::ptr::null_mut();
+    let bitmap = match unsafe {
+        CreateDIBSection(
+            Some(memory_dc),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits,
+            None,
+            0,
+        )
+    } {
+        Ok(bitmap) => bitmap,
+        Err(_) => {
+            let _ = unsafe { DeleteDC(memory_dc) };
+            return None;
+        }
+    };
+
+    let bitmap_object = HGDIOBJ(bitmap.0);
+    let previous_object = unsafe { SelectObject(memory_dc, bitmap_object) };
+    let byte_count = size as usize * size as usize * 4;
+    let pixels = if previous_object.0.is_null() || bits.is_null() {
+        None
+    } else {
+        unsafe { std::ptr::write_bytes(bits, 0, byte_count) };
+        if unsafe {
+            DrawIconEx(
+                memory_dc,
+                0,
+                0,
+                icon,
+                size as i32,
+                size as i32,
+                0,
+                None,
+                DI_NORMAL,
+            )
+        }
+        .is_ok()
+        {
+            let mut rgba =
+                unsafe { std::slice::from_raw_parts(bits.cast::<u8>(), byte_count).to_vec() };
+            for pixel in rgba.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+            if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+                for pixel in rgba.chunks_exact_mut(4) {
+                    if pixel[..3] != [0, 0, 0] {
+                        pixel[3] = 255;
+                    }
+                }
+            }
+            Some(rgba)
+        } else {
+            None
+        }
+    };
+
+    if !previous_object.0.is_null() {
+        unsafe { SelectObject(memory_dc, previous_object) };
+    }
+    let _ = unsafe { DeleteObject(bitmap_object) };
+    let _ = unsafe { DeleteDC(memory_dc) };
+    pixels
+}
+
+#[cfg(not(windows))]
+fn executable_icon(_program: &Path) -> Option<slint::Image> {
+    None
 }
 
 pub(super) fn available_open_methods() -> Vec<OpenMethod> {
@@ -384,6 +537,30 @@ mod tests {
                 methods[index + 1..]
                     .iter()
                     .all(|other| other.label != method.label)
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_methods_expose_renderable_shell_icons() {
+        for method in available_open_methods() {
+            let icon = method.icon().unwrap_or_else(|| {
+                panic!(
+                    "missing shell icon for {} at {}",
+                    method.label,
+                    method.program.display()
+                )
+            });
+            let pixels = icon
+                .to_rgba8()
+                .unwrap_or_else(|| panic!("invalid shell icon for {}", method.label));
+            assert_eq!(pixels.width(), 32);
+            assert_eq!(pixels.height(), 32);
+            assert!(
+                pixels.as_bytes().chunks_exact(4).any(|pixel| pixel[3] != 0),
+                "shell icon for {} is fully transparent",
+                method.label
             );
         }
     }
