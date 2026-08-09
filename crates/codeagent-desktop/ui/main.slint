@@ -12,6 +12,8 @@ import {
 export component MainWindow inherits Window {
     title: "CodeAgent";
     icon: @image-url("../assets/app-icon.png");
+    no-frame: true;
+    resize-border-width: root.maximized ? 0px : 6px;
     preferred-width: 1440px; preferred-height: 900px;
     min-width: 980px; min-height: 640px;
     background: #0d0e10;
@@ -119,6 +121,7 @@ export component MainWindow inherits Window {
     callback set-inspector(bool);
     callback set-respect-gitignore(bool);
     callback set-visible-thread-limit(int);
+    callback drag-window;
 
     public function clear-input-focus() {
         focus-sink.focus();
@@ -136,22 +139,28 @@ export component MainWindow inherits Window {
     }
 
     VerticalLayout {
-        visible: !root.startup-loading;
         spacing: 0px;
 
         AppHeader {
             usage-left-label: root.usage-left-label;
             connected: root.connected;
             connection-text: root.connection-text;
+            maximized: root.maximized;
+            drag-window => { root.drag-window(); }
+            toggle-maximize => { root.maximized = !root.maximized; }
+            minimize => { root.minimized = true; }
+            close => { root.close(); }
         }
 
         if root.codex-update-version != "": UpdateBanner {
+            visible: !root.startup-loading;
             version: root.codex-update-version;
             in-progress: root.codex-update-in-progress;
             update => { root.update-codex(); }
         }
 
         HorizontalLayout {
+            visible: !root.startup-loading;
             spacing: 0px;
 
             Sidebar {
@@ -280,5 +289,8 @@ export component MainWindow inherits Window {
         error: root.toast-error;
     }
 
-    if root.startup-loading: LoadingOverlay { }
+    if root.startup-loading: LoadingOverlay {
+        y: 36px;
+        height: parent.height - 36px;
+    }
 }

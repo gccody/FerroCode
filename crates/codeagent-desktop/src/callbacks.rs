@@ -36,6 +36,17 @@ pub(super) fn install_input_focus_dismissal(ui: &MainWindow) {
     });
 }
 
+pub(super) fn install_window_chrome(ui: &MainWindow) {
+    let weak = ui.as_weak();
+    ui.on_drag_window(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.window().with_winit_window(|window| {
+                let _ = window.drag_window();
+            });
+        }
+    });
+}
+
 pub(super) fn wire_callbacks(
     ui: &MainWindow,
     controller: &Rc<RefCell<Controller>>,

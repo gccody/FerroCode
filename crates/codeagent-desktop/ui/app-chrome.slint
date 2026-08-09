@@ -1,28 +1,177 @@
 import { BrandMark } from "icons.slint";
 import { SmallButton } from "controls.slint";
 
+component CaptionButton inherits Rectangle {
+    in property <bool> close-button: false;
+    out property <bool> hovered: hit.has-hover;
+    callback clicked;
+
+    width: 46px;
+    height: 36px;
+    background: hit.pressed
+        ? (root.close-button ? #a8221a : #313238)
+        : hit.has-hover
+            ? (root.close-button ? #c42b1c : #25262a)
+            : transparent;
+
+    hit := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component MinimizeButton inherits CaptionButton {
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 18px;
+        width: 10px;
+        height: 1px;
+        background: #d8d8dc;
+    }
+}
+
+component MaximizeButton inherits CaptionButton {
+    in property <bool> maximized: false;
+
+    if !root.maximized: Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 10px;
+        height: 10px;
+        background: transparent;
+        border-width: 1px;
+        border-color: #d8d8dc;
+    }
+
+    if root.maximized: Rectangle {
+        x: 19px;
+        y: 12px;
+        width: 9px;
+        height: 9px;
+        background: #0f1012;
+        border-width: 1px;
+        border-color: #d8d8dc;
+        Rectangle {
+            x: -3px;
+            y: 3px;
+            width: 9px;
+            height: 9px;
+            background: root.hovered ? #25262a : #0f1012;
+            border-width: 1px;
+            border-color: #d8d8dc;
+        }
+    }
+}
+
+component CloseButton inherits CaptionButton {
+    close-button: true;
+    Path {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 11px;
+        height: 11px;
+        commands: "M 1 1 L 10 10 M 10 1 L 1 10";
+        viewbox-width: 11;
+        viewbox-height: 11;
+        fill: transparent;
+        stroke: #f2f2f4;
+        stroke-width: 1px;
+    }
+}
+
 export component AppHeader inherits Rectangle {
     in property <string> usage-left-label: "";
     in property <bool> connected: false;
     in property <string> connection-text: "Starting Codex...";
+    in property <bool> maximized: false;
+    callback drag-window;
+    callback toggle-maximize;
+    callback minimize;
+    callback close;
 
-    height: 47px;
+    height: 36px;
     background: #0f1012;
-    border-width: 1px;
-    border-color: #292a2f;
+
     HorizontalLayout {
-        padding-left: 11px; padding-right: 17px; spacing: 9px;
-        BrandMark { y: (parent.height - self.height) / 2; }
-        Text { text: "CodeAgent"; color: #f1f1f3; font-size: 14px; vertical-alignment: TextVerticalAlignment.center; }
-        Rectangle { horizontal-stretch: 1; }
-        if root.usage-left-label != "": Rectangle {
-            width: usage-text.preferred-width + 18px; height: 19px;
-            y: (parent.height - self.height) / 2;
-            border-radius: 10px; background: #38393e;
-            usage-text := Text { text: root.usage-left-label; color: #f0f0f2; font-size: 11px; horizontal-alignment: TextHorizontalAlignment.center; vertical-alignment: TextVerticalAlignment.center; }
+        spacing: 0px;
+
+        drag-region := Rectangle {
+            horizontal-stretch: 1;
+            background: transparent;
+
+            HorizontalLayout {
+                padding-left: 11px;
+                spacing: 9px;
+                BrandMark {
+                    width: 16px;
+                    height: 16px;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    text: "CodeAgent";
+                    color: #f1f1f3;
+                    font-size: 12px;
+                    font-weight: 600;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            TouchArea {
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                        root.drag-window();
+                    }
+                }
+                double-clicked => { root.toggle-maximize(); }
+            }
         }
-        Rectangle { y: (parent.height - self.height) / 2; width: 8px; height: 8px; border-radius: 4px; background: root.connected ? #55d49a : #d6a54b; }
-        Text { text: root.connection-text; color: #a0a2aa; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; }
+
+        if root.usage-left-label != "": Rectangle {
+            width: usage-text.preferred-width + 18px;
+            height: 19px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 10px;
+            background: #38393e;
+            usage-text := Text {
+                text: root.usage-left-label;
+                color: #f0f0f2;
+                font-size: 11px;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+        }
+        Rectangle {
+            width: 20px;
+            background: transparent;
+            Rectangle {
+                x: 6px;
+                y: (parent.height - self.height) / 2;
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: root.connected ? #55d49a : #d6a54b;
+            }
+        }
+        Text {
+            width: self.preferred-width + 14px;
+            text: root.connection-text;
+            color: #a0a2aa;
+            font-size: 11px;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+        MinimizeButton { clicked => { root.minimize(); } }
+        MaximizeButton {
+            maximized: root.maximized;
+            clicked => { root.toggle-maximize(); }
+        }
+        CloseButton { clicked => { root.close(); } }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: #292a2f;
     }
 }
 
