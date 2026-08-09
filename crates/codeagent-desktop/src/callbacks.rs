@@ -12,6 +12,291 @@ use std::{
     time::Duration,
 };
 
+#[cfg(windows)]
+use std::{
+    ffi::c_void,
+    sync::atomic::{AtomicI32, AtomicU32, Ordering},
+};
+
+#[cfg(windows)]
+use windows::Win32::{
+    Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+    Graphics::Gdi::ScreenToClient,
+    UI::{
+        Input::KeyboardAndMouse::{ReleaseCapture, SetCapture},
+        Shell::{DefSubclassProc, SetWindowSubclass},
+        WindowsAndMessaging::{
+            EnableMenuItem, GetClientRect, GetCursorPos, GetSystemMenu, GetWindowRect, HTBOTTOM,
+            HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTCLOSE, HTLEFT, HTMAXBUTTON,
+            HTMINBUTTON, HTRIGHT, HTSYSMENU, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsZoomed,
+            MENU_ITEM_FLAGS, MENU_ITEM_STATE, MF_BYCOMMAND, MFS_DISABLED, MFS_ENABLED,
+            PostMessageW, SC_CLOSE, SC_KEYMENU, SC_MAXIMIZE, SC_MINIMIZE, SC_MOVE, SC_RESTORE,
+            SC_SIZE, SendMessageW, SetMenuDefaultItem, TPM_LEFTALIGN, TPM_RETURNCMD,
+            TrackPopupMenu, WM_CANCELMODE, WM_CAPTURECHANGED, WM_LBUTTONUP, WM_NCHITTEST,
+            WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCRBUTTONUP, WM_SYSCOMMAND,
+        },
+    },
+};
+
+#[cfg(windows)]
+static WINDOW_SCALE_MILLI: AtomicU32 = AtomicU32::new(1_000);
+
+#[cfg(windows)]
+static CAPTION_PRESSED: AtomicI32 = AtomicI32::new(0);
+
+#[cfg(windows)]
+const WINDOW_CHROME_SUBCLASS_ID: usize = 0x4341_5054;
+
+#[cfg(windows)]
+fn scaled_pixels(logical: i32) -> i32 {
+    let scale = WINDOW_SCALE_MILLI.load(Ordering::Relaxed) as i32;
+    (logical * scale + 500) / 1_000
+}
+
+#[cfg(windows)]
+fn point_from_lparam(lparam: LPARAM) -> POINT {
+    let packed = lparam.0 as u32;
+    POINT {
+        x: (packed as u16 as i16) as i32,
+        y: ((packed >> 16) as u16 as i16) as i32,
+    }
+}
+
+#[cfg(windows)]
+unsafe fn caption_hit_test(hwnd: HWND, mut point: POINT) -> Option<u32> {
+    if !unsafe { ScreenToClient(hwnd, &mut point) }.as_bool() {
+        return None;
+    }
+
+    let mut client = RECT::default();
+    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
+        return None;
+    }
+
+    let header_height = scaled_pixels(36);
+    if point.y < 0 || point.y >= header_height || point.x < 0 || point.x >= client.right {
+        return None;
+    }
+
+    let button_width = scaled_pixels(46);
+    let icon_width = scaled_pixels(34);
+    let distance_from_right = client.right - point.x;
+    Some(if point.x < icon_width {
+        HTSYSMENU
+    } else if distance_from_right <= button_width {
+        HTCLOSE
+    } else if distance_from_right <= button_width * 2 {
+        HTMAXBUTTON
+    } else if distance_from_right <= button_width * 3 {
+        HTMINBUTTON
+    } else {
+        HTCAPTION
+    })
+}
+
+#[cfg(windows)]
+unsafe fn resize_hit_test(hwnd: HWND, mut point: POINT) -> Option<u32> {
+    if unsafe { IsZoomed(hwnd) }.as_bool() || !unsafe { ScreenToClient(hwnd, &mut point) }.as_bool()
+    {
+        return None;
+    }
+
+    let mut client = RECT::default();
+    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
+        return None;
+    }
+
+    let border = scaled_pixels(6);
+    let left = point.x < border;
+    let right = point.x >= client.right - border;
+    let top = point.y < border;
+    let bottom = point.y >= client.bottom - border;
+
+    match (left, right, top, bottom) {
+        (true, _, true, _) => Some(HTTOPLEFT),
+        (_, true, true, _) => Some(HTTOPRIGHT),
+        (true, _, _, true) => Some(HTBOTTOMLEFT),
+        (_, true, _, true) => Some(HTBOTTOMRIGHT),
+        (true, _, _, _) => Some(HTLEFT),
+        (_, true, _, _) => Some(HTRIGHT),
+        (_, _, true, _) => Some(HTTOP),
+        (_, _, _, true) => Some(HTBOTTOM),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn caption_button_id(hit: u32) -> i32 {
+    match hit {
+        HTMINBUTTON => 1,
+        HTMAXBUTTON => 2,
+        HTCLOSE => 3,
+        _ => 0,
+    }
+}
+
+#[cfg(windows)]
+unsafe fn dispatch_caption_command(hwnd: HWND, button_id: i32) {
+    let command = match button_id {
+        1 => SC_MINIMIZE,
+        2 if unsafe { IsZoomed(hwnd) }.as_bool() => SC_RESTORE,
+        2 => SC_MAXIMIZE,
+        3 => SC_CLOSE,
+        _ => return,
+    };
+    unsafe {
+        SendMessageW(
+            hwnd,
+            WM_SYSCOMMAND,
+            Some(WPARAM(command as usize)),
+            Some(LPARAM::default()),
+        )
+    };
+}
+
+#[cfg(windows)]
+unsafe fn show_system_menu(hwnd: HWND, point: POINT) {
+    let menu = unsafe { GetSystemMenu(hwnd, false) };
+    if menu.0.is_null() {
+        return;
+    }
+
+    let maximized = unsafe { IsZoomed(hwnd) }.as_bool();
+    let enabled = |value| if value { MFS_ENABLED } else { MFS_DISABLED };
+    let flags = |state: MENU_ITEM_STATE| MENU_ITEM_FLAGS(MF_BYCOMMAND.0 | state.0);
+    unsafe {
+        let _ = EnableMenuItem(menu, SC_RESTORE, flags(enabled(maximized)));
+        let _ = EnableMenuItem(menu, SC_MOVE, flags(enabled(!maximized)));
+        let _ = EnableMenuItem(menu, SC_SIZE, flags(enabled(!maximized)));
+        let _ = EnableMenuItem(menu, SC_MINIMIZE, flags(MFS_ENABLED));
+        let _ = EnableMenuItem(menu, SC_MAXIMIZE, flags(enabled(!maximized)));
+        let _ = EnableMenuItem(menu, SC_CLOSE, flags(MFS_ENABLED));
+        let _ = SetMenuDefaultItem(menu, SC_CLOSE, 0);
+    }
+
+    let selected = unsafe {
+        TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_LEFTALIGN,
+            point.x,
+            point.y,
+            None,
+            hwnd,
+            None,
+        )
+    };
+    if selected.0 != 0 {
+        let _ = unsafe {
+            PostMessageW(
+                Some(hwnd),
+                WM_SYSCOMMAND,
+                WPARAM(selected.0 as usize),
+                LPARAM::default(),
+            )
+        };
+    }
+}
+
+#[cfg(windows)]
+unsafe fn system_menu_anchor(hwnd: HWND) -> POINT {
+    let mut window = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut window) }.is_err() {
+        return POINT::default();
+    }
+    POINT {
+        x: window.left,
+        y: window.top + scaled_pixels(36),
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn window_chrome_subclass(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass_id: usize,
+    _reference_data: usize,
+) -> LRESULT {
+    if message == WM_NCHITTEST {
+        let inherited = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
+        if inherited.0 != HTCLIENT as isize {
+            return inherited;
+        }
+        if let Some(hit) = unsafe { resize_hit_test(hwnd, point_from_lparam(lparam)) } {
+            return LRESULT(hit as isize);
+        }
+        if let Some(hit) = unsafe { caption_hit_test(hwnd, point_from_lparam(lparam)) } {
+            return LRESULT(hit as isize);
+        }
+        return inherited;
+    }
+
+    if message == WM_NCRBUTTONUP && matches!(wparam.0 as u32, HTCAPTION | HTSYSMENU) {
+        unsafe { show_system_menu(hwnd, point_from_lparam(lparam)) };
+        return LRESULT::default();
+    }
+
+    if message == WM_NCLBUTTONDBLCLK && wparam.0 as u32 == HTSYSMENU {
+        unsafe { dispatch_caption_command(hwnd, 3) };
+        return LRESULT::default();
+    }
+
+    if message == WM_SYSCOMMAND && (wparam.0 as u32 & 0xfff0) == SC_KEYMENU {
+        unsafe { show_system_menu(hwnd, system_menu_anchor(hwnd)) };
+        return LRESULT::default();
+    }
+
+    if message == WM_NCLBUTTONDOWN {
+        let button_id = caption_button_id(wparam.0 as u32);
+        if button_id != 0 {
+            CAPTION_PRESSED.store(button_id, Ordering::Relaxed);
+            unsafe {
+                SetCapture(hwnd);
+            }
+            return LRESULT::default();
+        }
+    } else if matches!(message, WM_LBUTTONUP | WM_NCLBUTTONUP) {
+        let button_id = CAPTION_PRESSED.swap(0, Ordering::Relaxed);
+        if button_id != 0 {
+            let _ = unsafe { ReleaseCapture() };
+            if caption_hover(hwnd) == button_id {
+                unsafe { dispatch_caption_command(hwnd, button_id) };
+            }
+            return LRESULT::default();
+        } else if message == WM_NCLBUTTONUP && wparam.0 as u32 == HTSYSMENU {
+            unsafe { show_system_menu(hwnd, system_menu_anchor(hwnd)) };
+            return LRESULT::default();
+        }
+    } else if matches!(message, WM_CANCELMODE | WM_CAPTURECHANGED) {
+        CAPTION_PRESSED.store(0, Ordering::Relaxed);
+    }
+
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+#[cfg(windows)]
+fn window_hwnd(window: &winit::window::Window) -> Option<HWND> {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let handle = window.window_handle().ok()?.as_raw();
+    match handle {
+        RawWindowHandle::Win32(handle) => Some(HWND(handle.hwnd.get() as *mut c_void)),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn caption_hover(hwnd: HWND) -> i32 {
+    let mut point = POINT::default();
+    if unsafe { GetCursorPos(&mut point) }.is_err() {
+        return 0;
+    }
+    unsafe { caption_hit_test(hwnd, point) }
+        .map(caption_button_id)
+        .unwrap_or_default()
+}
+
 pub(super) fn install_input_focus_dismissal(ui: &MainWindow) {
     let weak = ui.as_weak();
     ui.window().on_winit_window_event(move |_, event| {
@@ -36,7 +321,7 @@ pub(super) fn install_input_focus_dismissal(ui: &MainWindow) {
     });
 }
 
-pub(super) fn install_window_chrome(ui: &MainWindow) {
+pub(super) fn install_window_chrome(ui: &MainWindow) -> Timer {
     let weak = ui.as_weak();
     ui.on_drag_window(move || {
         if let Some(ui) = weak.upgrade() {
@@ -45,6 +330,52 @@ pub(super) fn install_window_chrome(ui: &MainWindow) {
             });
         }
     });
+
+    let timer = Timer::default();
+    #[cfg(windows)]
+    {
+        let weak = ui.as_weak();
+        let subclass_installed = Rc::new(Cell::new(false));
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(16),
+            move || {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                let installed = subclass_installed.clone();
+                let hover = ui
+                    .window()
+                    .with_winit_window(|window| {
+                        WINDOW_SCALE_MILLI.store(
+                            (window.scale_factor() * 1_000.0).round() as u32,
+                            Ordering::Relaxed,
+                        );
+                        let Some(hwnd) = window_hwnd(window) else {
+                            return 0;
+                        };
+                        if !installed.get() {
+                            let succeeded = unsafe {
+                                SetWindowSubclass(
+                                    hwnd,
+                                    Some(window_chrome_subclass),
+                                    WINDOW_CHROME_SUBCLASS_ID,
+                                    0,
+                                )
+                            }
+                            .as_bool();
+                            installed.set(succeeded);
+                        }
+                        caption_hover(hwnd)
+                    })
+                    .unwrap_or_default();
+                ui.set_caption_hover(hover);
+                ui.set_caption_pressed(CAPTION_PRESSED.load(Ordering::Relaxed));
+            },
+        );
+    }
+
+    timer
 }
 
 pub(super) fn wire_callbacks(
