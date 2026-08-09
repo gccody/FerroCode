@@ -61,7 +61,12 @@ pub(super) fn message_height(item: &ConversationItem, markdown_blocks: &[Markdow
         .map(|block| block.block_height)
         .sum::<f32>()
         + markdown_blocks.len().saturating_sub(1) as f32 * 7.0;
-    (content_height + 10.0).max(38.0)
+    let copy_action_height = if item.kind == ItemKind::Assistant && item.duration_ms.is_some() {
+        35.0
+    } else {
+        0.0
+    };
+    (content_height + copy_action_height + 10.0).max(38.0)
 }
 
 pub(super) fn elapsed_duration_label(duration_ms: u64) -> String {

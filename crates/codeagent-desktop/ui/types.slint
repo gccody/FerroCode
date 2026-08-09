@@ -7,7 +7,7 @@ export struct ThreadRow {
     active: bool, busy: bool, completed-unread: bool, project-index: int
 }
 
-export struct MarkdownTableCell { text: styled-text, alignment: string, column-width: length }
+export struct MarkdownTableCell { text: styled-text, raw-text: string, alignment: string, column-width: length }
 export struct MarkdownTableRow { cells: [MarkdownTableCell], header: bool, row-height: length }
 
 export struct MarkdownBlock {

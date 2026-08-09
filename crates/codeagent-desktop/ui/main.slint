@@ -92,6 +92,7 @@ export component MainWindow inherits Window {
     callback paste-image() -> bool;
     callback remove-attachment(int);
     callback copy-code(string);
+    callback copy-response(string);
     callback toggle-message(string);
     callback toggle-response-details(string);
     callback select-model(string);
@@ -192,6 +193,7 @@ export component MainWindow inherits Window {
                 paste-image => { root.paste-image() }
                 remove-attachment(index) => { root.remove-attachment(index); }
                 copy-code(text) => { root.copy-code(text); }
+                copy-response(text) => { root.copy-response(text); }
                 toggle-message(id) => { root.toggle-message(id); }
                 toggle-response-details(id) => { root.toggle-response-details(id); }
                 select-model(value) => { root.select-model(value); }

@@ -177,6 +177,7 @@ pub(super) fn styled_block(kind: &str, markdown: &str, reasoning: bool) -> Markd
     MarkdownBlock {
         kind: kind.into(),
         text,
+        raw_text: markdown_plain_text(markdown).into(),
         block_height: if kind == "quote" {
             height + 14.0 + GLYPH_OVERFLOW
         } else {
@@ -200,6 +201,7 @@ pub(super) fn heading_block(level: i32, markdown: &str) -> MarkdownBlock {
     MarkdownBlock {
         kind: "heading".into(),
         text,
+        raw_text: markdown_plain_text(markdown).into(),
         level,
         block_height: height,
         ..empty_markdown_block()
@@ -278,6 +280,7 @@ pub(super) fn table_row(
                 MarkdownTableCell {
                     text: StyledText::from_markdown(&normalized)
                         .unwrap_or_else(|_| StyledText::from_plain_text(cell.trim())),
+                    raw_text: markdown_plain_text(cell.trim()).into(),
                     alignment: (*alignment).into(),
                     column_width: *width,
                 }
@@ -316,6 +319,66 @@ pub(super) fn markdown_visible_len(markdown: &str) -> usize {
         count += 1;
     }
     count
+}
+
+/// Returns the text a user sees after the small inline-markdown subset used by
+/// the conversation renderer is applied. Selection overlays use this so copied
+/// text does not include emphasis markers or link destinations.
+pub(super) fn markdown_plain_text(markdown: &str) -> String {
+    let chars = markdown.chars().collect::<Vec<_>>();
+    let mut plain = String::with_capacity(markdown.len());
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == '\\' && index + 1 < chars.len() {
+            plain.push(chars[index + 1]);
+            index += 2;
+            continue;
+        }
+
+        let label_start = if chars[index] == '!' && chars.get(index + 1) == Some(&'[') {
+            Some(index + 2)
+        } else if chars[index] == '[' {
+            Some(index + 1)
+        } else {
+            None
+        };
+        if let Some(label_start) = label_start
+            && let Some(label_end) = chars[label_start..].iter().position(|ch| *ch == ']')
+        {
+            let label_end = label_start + label_end;
+            if chars.get(label_end + 1) == Some(&'(')
+                && let Some(destination_end) =
+                    chars[label_end + 2..].iter().position(|ch| *ch == ')')
+            {
+                let label = chars[label_start..label_end].iter().collect::<String>();
+                plain.push_str(&markdown_plain_text(&label));
+                index = label_end + 2 + destination_end + 1;
+                continue;
+            }
+        }
+
+        let marker = chars[index];
+        let previous = index.checked_sub(1).and_then(|index| chars.get(index));
+        let next = chars.get(index + 1);
+        let underscore_in_word = marker == '_'
+            && previous.is_some_and(|ch| ch.is_alphanumeric())
+            && next.is_some_and(|ch| ch.is_alphanumeric());
+        let emphasis_marker = matches!(marker, '*' | '_')
+            && !underscore_in_word
+            && (previous.is_some_and(|ch| !ch.is_whitespace())
+                || next.is_some_and(|ch| !ch.is_whitespace()));
+        let strike_marker = marker == '~' && (previous == Some(&'~') || next == Some(&'~'));
+        if marker == '`' || emphasis_marker || strike_marker {
+            index += 1;
+            continue;
+        }
+
+        plain.push(marker);
+        index += 1;
+    }
+
+    plain
 }
 
 pub(super) fn opening_fence(line: &str) -> Option<(char, usize, &str)> {
