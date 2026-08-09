@@ -76,6 +76,20 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    let thread_age_controller = controller.clone();
+    let thread_age_ui = ui.as_weak();
+    let thread_age_search = search.clone();
+    let thread_age_timer = Timer::default();
+    thread_age_timer.start(TimerMode::Repeated, Duration::from_secs(30), move || {
+        if let Some(ui) = thread_age_ui.upgrade() {
+            sync_thread_rows(
+                &ui,
+                &thread_age_controller.borrow().state,
+                &thread_age_search.borrow(),
+            );
+        }
+    });
+
     let save_controller = controller.clone();
     let save_store = store.clone();
     let last_saved_revision = Rc::new(RefCell::new(0_u64));

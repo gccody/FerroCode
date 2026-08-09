@@ -2,7 +2,7 @@ use crate::{
     MainWindow, ProjectRow, change_rows, context_ring_path, file_rows, message_rows, model,
     project_rows_match, question_row, sync_message_rows, thread_rows, thread_rows_match,
 };
-use codeagent_app::Controller;
+use codeagent_app::{AppState, Controller};
 use codeagent_core::{ApprovalChoice, SandboxChoice, format_token_count, short_path};
 use slint::SharedString;
 use std::collections::{BTreeMap, HashSet};
@@ -40,7 +40,7 @@ pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     ui.set_codex_update_in_progress(state.codex_update_in_progress);
     ui.set_inspector_visible(state.prefs.show_inspector || ui.get_inspector_visible());
 
-    let threads = thread_rows(state, search);
+    let threads = sync_thread_rows(ui, state, search);
     let mut thread_counts = BTreeMap::<String, i32>::new();
     for thread in &threads {
         *thread_counts
@@ -64,9 +64,6 @@ pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
         ui.set_projects(model(projects));
     }
 
-    if !thread_rows_match(&ui.get_threads(), &threads) {
-        ui.set_threads(model(threads));
-    }
     ui.set_active_thread_id(state.active_local_thread.clone().unwrap_or_default().into());
     if sync_message_rows(ui, message_rows(&state.conversation)) {
         let revision = ui.get_message_revision();
@@ -287,4 +284,16 @@ pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     } else {
         ui.set_toast_text("".into());
     }
+}
+
+pub(super) fn sync_thread_rows(
+    ui: &MainWindow,
+    state: &AppState,
+    search: &str,
+) -> Vec<crate::ThreadRow> {
+    let threads = thread_rows(state, search);
+    if !thread_rows_match(&ui.get_threads(), &threads) {
+        ui.set_threads(model(threads.clone()));
+    }
+    threads
 }
