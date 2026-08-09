@@ -212,13 +212,14 @@ export component ConversationPane inherits Rectangle {
         }
 
         Rectangle {
-            height: root.attachments.length > 0 ? 210px : 132px;
+            height: composer-shell.height + 16px;
             background: #0d0e10;
             border-width: 1px;
             border-color: #292a2f;
             composer-shell := Rectangle {
+                private property <length> input-height: min(112px, max(59px, composer.content-height + 2px));
                 width: min(parent.width - 38px, 820px);
-                height: root.attachments.length > 0 ? 194px : 116px;
+                height: self.input-height + (root.attachments.length > 0 ? 135px : 57px);
                 x: (parent.width - self.width) / 2;
                 y: 8px;
                 background: #17181d;
@@ -226,7 +227,7 @@ export component ConversationPane inherits Rectangle {
                 border-color: #303138;
                 border-radius: 14px;
                 composer := ComposerEdit {
-                    x: 13px; y: 10px; width: parent.width - 26px; height: 59px;
+                    x: 13px; y: 10px; width: parent.width - 26px; height: parent.input-height;
                     enabled: root.connected && root.has-project && !root.busy;
                     placeholder-text: !root.has-project ? "Add a project folder before starting a thread" : root.connected ? "Ask for a follow-up or describe a task" : "Waiting for Codex CLI...";
                     key-pressed(event) => {
@@ -242,7 +243,7 @@ export component ConversationPane inherits Rectangle {
                     }
                 }
                 if root.attachments.length > 0: ScrollView {
-                    x: 12px; y: 72px; width: parent.width - 24px; height: 74px;
+                    x: 12px; y: composer.y + composer.height + 3px; width: parent.width - 24px; height: 74px;
                     horizontal-scrollbar-policy: as-needed;
                     vertical-scrollbar-policy: always-off;
                     HorizontalLayout {
@@ -254,7 +255,9 @@ export component ConversationPane inherits Rectangle {
                     }
                 }
                 HorizontalLayout {
-                    x: 12px; y: root.attachments.length > 0 ? 153px : 75px; width: parent.width - 24px; height: 34px; spacing: 7px;
+                    x: 12px;
+                    y: composer.y + composer.height + (root.attachments.length > 0 ? 84px : 6px);
+                    width: parent.width - 24px; height: 34px; spacing: 7px;
                     ComposerAttachButton {
                         enabled: root.has-project;
                         clicked => { root.attach-files(); }
