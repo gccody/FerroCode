@@ -14,6 +14,7 @@ slint::include_modules!();
 mod attachments;
 mod callbacks;
 mod markdown;
+mod project_launcher;
 mod sync;
 mod view_models;
 mod workspace_view;
@@ -21,6 +22,7 @@ mod workspace_view;
 use attachments::*;
 use callbacks::*;
 use markdown::*;
+use project_launcher::*;
 use sync::*;
 use view_models::*;
 use workspace_view::*;
@@ -31,6 +33,12 @@ fn main() -> Result<(), slint::PlatformError> {
     let controller = Rc::new(RefCell::new(Controller::new(persisted)));
     controller.borrow_mut().start();
     let ui = MainWindow::new()?;
+    let open_methods = Rc::new(available_open_methods());
+    ui.set_open_project_methods(model(
+        open_methods
+            .iter()
+            .map(|method| slint::SharedString::from(method.label())),
+    ));
     install_input_focus_dismissal(&ui);
     let search = Rc::new(RefCell::new(String::new()));
     let attachments = Rc::new(RefCell::new(Vec::<PendingAttachment>::new()));
@@ -42,6 +50,7 @@ fn main() -> Result<(), slint::PlatformError> {
         &search,
         &attachments,
         &attachment_temp_dir,
+        &open_methods,
     );
     sync_ui(&ui, &controller.borrow(), &search.borrow());
 

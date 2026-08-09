@@ -352,6 +352,99 @@ export component ComposerComboBox inherits Rectangle {
     }
 }
 
+export component OpenProjectButton inherits Rectangle {
+    in property <[string]> methods;
+    in property <bool> enabled: true;
+    callback selected(string);
+
+    private property <int> visible-items: min(7, root.methods.length);
+
+    width: 94px;
+    height: 30px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: root.enabled ? #3a3c43 : #2a2b30;
+    background: !root.enabled ? #15161a : open-touch.pressed ? #202126 : open-touch.has-hover ? #292a30 : #191a1e;
+    accessible-role: button;
+    accessible-label: "Open project in";
+    accessible-enabled: root.enabled;
+    accessible-expandable: true;
+    accessible-action-expand => { root.open-menu(); }
+
+    public function open-menu() {
+        if root.enabled && root.methods.length > 0 {
+            open-popup.show();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 9px;
+        spacing: 7px;
+        Text {
+            text: "Open in";
+            color: root.enabled ? #d9dae0 : #696b72;
+            font-size: 11px;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+        Rectangle { horizontal-stretch: 1; }
+        ComposerChevron { y: (parent.height - self.height) / 2; }
+    }
+    open-touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.open-menu(); }
+    }
+
+    open-popup := PopupWindow {
+        x: root.width - self.width;
+        y: root.height + 4px;
+        width: 190px;
+        height: root.visible-items * 34px + 8px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            border-radius: 7px;
+            border-width: 1px;
+            border-color: #3b3d44;
+            background: #202126;
+
+            ScrollView {
+                x: 4px;
+                y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                horizontal-scrollbar-policy: always-off;
+
+                VerticalLayout {
+                    spacing: 2px;
+                    for method in root.methods: Rectangle {
+                        height: 32px;
+                        border-radius: 5px;
+                        background: method-touch.has-hover ? #35363c : transparent;
+                        Text {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            text: method;
+                            color: #f0f0f2;
+                            font-size: 12px;
+                            vertical-alignment: TextVerticalAlignment.center;
+                            overflow: elide;
+                        }
+                        method-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.selected(method);
+                                open-popup.close();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component SectionTitle inherits Text {
     color: #9799a1;
     font-size: 12px;

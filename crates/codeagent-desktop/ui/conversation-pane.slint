@@ -1,14 +1,17 @@
-import { ListView, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { ListView } from "conversation-list.slint";
 import { AttachmentRow, MessageRow } from "types.slint";
 import { BrandMark, InspectorMark, SendMark, StopMark } from "icons.slint";
 import {
     AttachmentPreview, ComposerAttachButton, ComposerComboBox, ComposerEdit, ContextIndicator,
+    OpenProjectButton,
 } from "controls.slint";
 import { MessageCard } from "message-card.slint";
 
 export component ConversationPane inherits Rectangle {
     in property <[MessageRow]> messages;
     in property <int> message-revision: 0;
+    in property <length> message-content-height: 0px;
     in property <[AttachmentRow]> attachments;
     in property <string> workspace-path: "";
     in property <string> workspace-name: "Workspace";
@@ -25,6 +28,7 @@ export component ConversationPane inherits Rectangle {
     in property <[string]> model-names;
     in property <[string]> effort-names;
     in property <[string]> sandbox-names;
+    in property <[string]> open-project-methods;
     in-out property <int> selected-model-index: 0;
     in-out property <int> selected-effort-index: 0;
     in-out property <int> selected-sandbox-index: 1;
@@ -41,12 +45,14 @@ export component ConversationPane inherits Rectangle {
     callback select-model(string);
     callback select-effort(string);
     callback select-sandbox(string);
+    callback open-project(string);
 
     horizontal-stretch: 1;
     background: #0d0e10;
 
     changed active-thread-id => {
         root.follow-latest = root.active-thread-id != "";
+        root.stable-scroll-offset = 0px;
         // ListView discovers variable-height delegates lazily. A few event-loop
         // passes let its estimated viewport height settle before the final seek.
         root.scroll-latest-attempts = root.active-thread-id == "" ? 0 : 3;
@@ -72,6 +78,7 @@ export component ConversationPane inherits Rectangle {
     }
 
     private property <bool> follow-latest: true;
+    private property <length> stable-scroll-offset: 0px;
     private property <int> scroll-latest-attempts: 0;
     private property <int> layout-settle-attempts: 0;
     private property <bool> user-scroll-pending: false;
@@ -150,6 +157,11 @@ export component ConversationPane inherits Rectangle {
                 }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: root.workspace-path; color: #8d8f97; font-size: 10px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                OpenProjectButton {
+                    methods: root.open-project-methods;
+                    enabled: root.has-project && root.open-project-methods.length > 0;
+                    selected(value) => { root.open-project(value); }
+                }
                 Rectangle {
                     width: 32px; height: 30px;
                     y: (parent.height - self.height) / 2;
@@ -186,8 +198,8 @@ export component ConversationPane inherits Rectangle {
                     x: max(16px, (parent.width - 850px) / 2);
                     width: min(parent.width - 32px, 850px);
                     height: parent.height;
-                    vertical-scrollbar-policy: as-needed;
-                    horizontal-scrollbar-policy: always-off;
+                    content-height: root.message-content-height;
+                    scroll-offset <=> root.stable-scroll-offset;
                     scrolled => {
                         // This callback is emitted by user input, but for a mouse
                         // wheel it fires before the smooth-scroll animation runs.
@@ -200,7 +212,28 @@ export component ConversationPane inherits Rectangle {
                         user-scroll-settle-timer.stop();
                         user-scroll-settle-timer.start();
                     }
-                    for message in root.messages: MessageCard {
+                    for message[index] in root.messages: MessageCard {
+                        private property <length> screen-y: self.y + conversation.viewport-y;
+                        private property <length> reported-scroll-offset: message.scroll-offset - self.screen-y;
+                        changed reported-scroll-offset => {
+                            if conversation.viewport-y >= -1px {
+                                root.stable-scroll-offset = 0px;
+                            } else if conversation.viewport-y <= conversation.visible-height
+                                - conversation.viewport-height + 1px {
+                                root.stable-scroll-offset = max(
+                                    0px,
+                                    root.message-content-height - conversation.visible-height
+                                );
+                            } else if self.screen-y <= 0px && self.screen-y + self.height > 0px {
+                                root.stable-scroll-offset = max(
+                                    0px,
+                                    min(
+                                        root.message-content-height - conversation.visible-height,
+                                        self.reported-scroll-offset
+                                    )
+                                );
+                            }
+                        }
                         message: message;
                         copy-code(text) => { root.copy-code(text); }
                         copy-response(text) => { root.copy-response(text); }

@@ -1,0 +1,117 @@
+// Slint's virtualized ListView estimates its content height from the delegates
+// that are currently visible. Conversation rows vary greatly in height, so the
+// native scrollbar thumb changes size as different parts of a long thread are
+// measured. Keep the native list mechanics, but draw the thumb from the stable
+// height estimate supplied for the whole conversation.
+export component ListView inherits Rectangle {
+    in property <bool> enabled: true;
+    out property <length> visible-width <=> flickable.width;
+    out property <length> visible-height <=> flickable.height;
+    in-out property <length> viewport-width <=> flickable.viewport-width;
+    in-out property <length> viewport-height <=> flickable.viewport-height;
+    in-out property <length> viewport-x <=> flickable.viewport-x;
+    in-out property <length> viewport-y <=> flickable.viewport-y;
+    in property <length> content-height: 0px;
+    in-out property <length> scroll-offset: 0px;
+
+    callback scrolled <=> flickable.flicked;
+
+    private property <length> scroll-range: max(0px, root.viewport-height - root.visible-height);
+    private property <length> stable-scroll-range: max(0px, root.content-height - root.visible-height);
+    private property <length> stable-height: max(root.visible-height, root.content-height);
+    private property <float> scroll-progress: root.stable-scroll-range <= 0px
+        ? 0
+        : max(0, min(1, root.scroll-offset / root.stable-scroll-range));
+
+    accessible-role: list;
+    accessible-orientation: Orientation.vertical;
+
+    flickable := Flickable {
+        width: parent.width;
+        height: parent.height;
+        interactive: false;
+        @children
+    }
+
+    scrollbar := Rectangle {
+        visible: root.content-height > root.visible-height;
+        x: parent.width - 14px;
+        width: 14px;
+        height: parent.height;
+        background: scrollbar-touch.has-hover ? #202126 : transparent;
+
+        private property <length> track-offset: 16px;
+        private property <length> track-height: max(0px, self.height - 2 * self.track-offset);
+        private property <length> thumb-height: max(
+            min(16px, self.height),
+            self.track-height * root.visible-height / root.stable-height
+        );
+        private property <length> thumb-y: self.track-offset
+            + (self.track-height - self.thumb-height) * root.scroll-progress;
+
+        thumb := Rectangle {
+            x: parent.width - (scrollbar-touch.has-hover ? 10px : 6px);
+            y: parent.thumb-y;
+            width: scrollbar-touch.has-hover ? 6px : 2px;
+            height: parent.thumb-height;
+            border-radius: self.width / 2;
+            background: #62636a;
+
+            animate x, width { duration: 150ms; easing: ease-out; }
+        }
+
+        scrollbar-touch := TouchArea {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: pointer;
+
+            private property <length> pressed-viewport-y: 0px;
+            private property <length> pressed-scroll-offset: 0px;
+            private property <length> pressed-mouse-y: 0px;
+
+            pointer-event(event) => {
+                if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    self.pressed-viewport-y = root.viewport-y;
+                    self.pressed-scroll-offset = root.scroll-offset;
+                    self.pressed-mouse-y = self.mouse-y;
+                }
+            }
+
+            moved => {
+                if self.pressed && scrollbar.track-height > scrollbar.thumb-height {
+                    root.scroll-offset = max(
+                        0px,
+                        min(
+                            root.stable-scroll-range,
+                            self.pressed-scroll-offset
+                                + (self.mouse-y - self.pressed-mouse-y)
+                                    * root.stable-scroll-range
+                                    / (scrollbar.track-height - scrollbar.thumb-height)
+                        )
+                    );
+                    root.viewport-y = root.stable-scroll-range <= 0px
+                        ? 0px
+                        : 0px - root.scroll-offset * root.scroll-range / root.stable-scroll-range;
+                    root.scrolled();
+                }
+            }
+
+            scroll-event(event) => {
+                if event.delta-y != 0 {
+                    root.scroll-offset = max(
+                        0px,
+                        min(root.stable-scroll-range, root.scroll-offset - event.delta-y)
+                    );
+                    root.viewport-y = root.stable-scroll-range <= 0px
+                        ? 0px
+                        : 0px - root.scroll-offset * root.scroll-range / root.stable-scroll-range;
+                    root.scrolled();
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+}

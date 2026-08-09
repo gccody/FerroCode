@@ -20,6 +20,7 @@ export component MainWindow inherits Window {
     in property <[ThreadRow]> threads;
     in property <[MessageRow]> messages;
     in property <int> message-revision: 0;
+    in property <length> message-content-height: 0px;
     in property <[FileRow]> files;
     in property <[ChangeRow]> changes;
     in property <[string]> activity;
@@ -27,6 +28,7 @@ export component MainWindow inherits Window {
     in property <[string]> effort-names;
     in property <[string]> sandbox-names;
     in property <[string]> approval-names;
+    in property <[string]> open-project-methods;
     in property <string> connection-text: "Starting Codex...";
     in property <bool> connected: false;
     in-out property <bool> startup-loading: true;
@@ -80,6 +82,7 @@ export component MainWindow inherits Window {
     in property <bool> codex-update-in-progress: false;
 
     callback add-project;
+    callback open-project(string);
     callback select-project(string);
     callback toggle-project(string);
     callback new-thread;
@@ -171,6 +174,7 @@ export component MainWindow inherits Window {
             ConversationPane {
                 messages: root.messages;
                 message-revision: root.message-revision;
+                message-content-height: root.message-content-height;
                 attachments: root.attachments;
                 workspace-path: root.workspace-path;
                 workspace-name: root.workspace-name;
@@ -187,6 +191,7 @@ export component MainWindow inherits Window {
                 model-names: root.model-names;
                 effort-names: root.effort-names;
                 sandbox-names: root.sandbox-names;
+                open-project-methods: root.open-project-methods;
                 selected-model-index <=> root.selected-model-index;
                 selected-effort-index <=> root.selected-effort-index;
                 selected-sandbox-index <=> root.selected-sandbox-index;
@@ -202,6 +207,7 @@ export component MainWindow inherits Window {
                 select-model(value) => { root.select-model(value); }
                 select-effort(value) => { root.select-effort(value); }
                 select-sandbox(value) => { root.select-sandbox(value); }
+                open-project(value) => { root.open-project(value); }
             }
 
             if root.inspector-visible: InspectorPanel {

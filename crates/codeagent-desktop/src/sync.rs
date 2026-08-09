@@ -1,6 +1,7 @@
 use crate::{
-    MainWindow, ProjectRow, change_rows, context_ring_path, file_rows, message_rows, model,
-    project_rows_match, question_row, sync_message_rows, thread_rows, thread_rows_match,
+    MainWindow, ProjectRow, change_rows, context_ring_path, file_rows, message_content_height,
+    message_rows, model, project_rows_match, question_row, sync_message_rows, thread_rows,
+    thread_rows_match,
 };
 use codeagent_app::{AppState, Controller};
 use codeagent_core::{ApprovalChoice, SandboxChoice, format_token_count, short_path};
@@ -65,7 +66,9 @@ pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     }
 
     ui.set_active_thread_id(state.active_local_thread.clone().unwrap_or_default().into());
-    if sync_message_rows(ui, message_rows(&state.conversation)) {
+    let messages = message_rows(&state.conversation);
+    ui.set_message_content_height(message_content_height(&messages));
+    if sync_message_rows(ui, messages) {
         let revision = ui.get_message_revision();
         ui.set_message_revision(if revision == i32::MAX {
             0
