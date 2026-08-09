@@ -1,4 +1,4 @@
-use codeagent_core::{
+use ferro_code_core::{
     AccountInfo, AppHistory, Approval, ConversationItem, LocalThread, ModelOption, PersistedState,
     PlanUsage, Preferences, Project, ThreadAgentSettings,
 };
@@ -86,7 +86,7 @@ impl AppState {
             toast: None,
             codex_update_version: None,
             codex_update_in_progress: false,
-            activity_log: vec!["CodeAgent launched".into()],
+            activity_log: vec!["Ferro Code launched".into()],
             git_diff: String::new(),
             files: Vec::new(),
             revision: 1,
@@ -361,7 +361,7 @@ impl AppState {
         if let Some(messages) = messages
             && let Some(last_user) = messages
                 .iter()
-                .rposition(|item| item.kind == codeagent_core::ItemKind::User)
+                .rposition(|item| item.kind == ferro_code_core::ItemKind::User)
         {
             let response_start = last_user + 1;
             let response_end = messages.len();
@@ -385,11 +385,11 @@ impl AppState {
             item.id == id
                 && matches!(
                     item.kind,
-                    codeagent_core::ItemKind::Command
-                        | codeagent_core::ItemKind::Tool
-                        | codeagent_core::ItemKind::FileChange
-                        | codeagent_core::ItemKind::Plan
-                        | codeagent_core::ItemKind::System
+                    ferro_code_core::ItemKind::Command
+                        | ferro_code_core::ItemKind::Tool
+                        | ferro_code_core::ItemKind::FileChange
+                        | ferro_code_core::ItemKind::Plan
+                        | ferro_code_core::ItemKind::System
                 )
         }) else {
             return false;
@@ -403,7 +403,7 @@ impl AppState {
         let Some(item) = self
             .conversation
             .iter_mut()
-            .find(|item| item.id == id && item.kind == codeagent_core::ItemKind::Assistant)
+            .find(|item| item.id == id && item.kind == ferro_code_core::ItemKind::Assistant)
         else {
             return false;
         };
@@ -475,18 +475,18 @@ fn collapse_response_details(
 ) -> Option<usize> {
     let final_answer = messages[response_start..response_end]
         .iter()
-        .rposition(|item| item.kind == codeagent_core::ItemKind::Assistant)
+        .rposition(|item| item.kind == ferro_code_core::ItemKind::Assistant)
         .map(|index| response_start + index);
     if let Some(final_answer) = final_answer {
         for item in &mut messages[response_start..response_end] {
             item.response_details_collapsed = false;
             item.collapsed = matches!(
                 item.kind,
-                codeagent_core::ItemKind::Command
-                    | codeagent_core::ItemKind::Tool
-                    | codeagent_core::ItemKind::FileChange
-                    | codeagent_core::ItemKind::Plan
-                    | codeagent_core::ItemKind::System
+                ferro_code_core::ItemKind::Command
+                    | ferro_code_core::ItemKind::Tool
+                    | ferro_code_core::ItemKind::FileChange
+                    | ferro_code_core::ItemKind::Plan
+                    | ferro_code_core::ItemKind::System
             );
         }
         messages[final_answer].response_details_collapsed = true;
@@ -499,7 +499,7 @@ fn initialize_response_collapse_state(messages: &mut [ConversationItem]) {
     let user_indexes = messages
         .iter()
         .enumerate()
-        .filter_map(|(index, item)| (item.kind == codeagent_core::ItemKind::User).then_some(index))
+        .filter_map(|(index, item)| (item.kind == ferro_code_core::ItemKind::User).then_some(index))
         .collect::<Vec<_>>();
 
     for (position, user_index) in user_indexes.iter().copied().enumerate() {
@@ -509,7 +509,7 @@ fn initialize_response_collapse_state(messages: &mut [ConversationItem]) {
             .copied()
             .unwrap_or(messages.len());
         let completed = messages[response_start..response_end].iter().any(|item| {
-            item.kind == codeagent_core::ItemKind::Assistant && item.duration_ms.is_some()
+            item.kind == ferro_code_core::ItemKind::Assistant && item.duration_ms.is_some()
         });
         if completed {
             collapse_response_details(messages, response_start, response_end);
@@ -541,7 +541,7 @@ fn format_error_message(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codeagent_core::{ItemKind, PersistedState};
+    use ferro_code_core::{ItemKind, PersistedState};
 
     fn state() -> AppState {
         AppState::from_persisted(PersistedState::default())
@@ -850,13 +850,13 @@ mod tests {
         let mut state = state();
         state.prefs.model = "gpt-5.6-sol".into();
         state.prefs.effort = "high".into();
-        state.prefs.sandbox = codeagent_core::SandboxChoice::FullAccess;
+        state.prefs.sandbox = ferro_code_core::SandboxChoice::FullAccess;
         state.add_project(r"C:\Code\Demo".into(), 1);
 
         let first = state.new_thread(2).unwrap();
         state.prefs.model = "gpt-5.6-luna".into();
         state.prefs.effort = "low".into();
-        state.prefs.sandbox = codeagent_core::SandboxChoice::ReadOnly;
+        state.prefs.sandbox = ferro_code_core::SandboxChoice::ReadOnly;
         let second = state.new_thread(3).unwrap();
 
         let first_agent = &state
@@ -869,7 +869,7 @@ mod tests {
         assert_eq!(first_agent.effort, "high");
         assert_eq!(
             first_agent.sandbox,
-            Some(codeagent_core::SandboxChoice::FullAccess)
+            Some(ferro_code_core::SandboxChoice::FullAccess)
         );
 
         assert_eq!(state.active_local_thread.as_deref(), Some(second.as_str()));

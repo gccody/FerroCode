@@ -1,14 +1,13 @@
 [package]
-name = "codeagent-app"
+name = "ferro-code-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Testable CodeAgent application state machine"
+description = "Testable Ferro Code application state machine"
 
 [dependencies]
-codeagent-core.workspace = true
-codeagent-protocol.workspace = true
+ferro-code-core.workspace = true
+ferro-code-protocol.workspace = true
 crossbeam-channel.workspace = true
 serde_json.workspace = true
-

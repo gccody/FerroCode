@@ -1,6 +1,6 @@
 use super::*;
-use codeagent_app::{AppState, Question};
-use codeagent_core::{ConversationItem, ItemKind};
+use ferro_code_app::{AppState, Question};
+use ferro_code_core::{ConversationItem, ItemKind};
 use slint::{Model, StyledText, VecModel};
 use std::collections::HashSet;
 
@@ -295,7 +295,7 @@ fn activity_titles_cover_running_completed_and_web_search_states() {
 
 #[test]
 fn thread_rows_include_all_projects_and_map_sidebar_state() {
-    let mut state = AppState::from_persisted(codeagent_core::PersistedState::default());
+    let mut state = AppState::from_persisted(ferro_code_core::PersistedState::default());
     let first_project = state.add_project(r"C:\Code\First".into(), 1);
     let first_thread = state.new_thread(10).unwrap();
     let first = state

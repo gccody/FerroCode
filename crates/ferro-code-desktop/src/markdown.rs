@@ -1,5 +1,5 @@
 use crate::{MarkdownBlock, MarkdownTableCell, MarkdownTableRow, model};
-use codeagent_core::{ConversationItem, ItemKind};
+use ferro_code_core::{ConversationItem, ItemKind};
 use slint::StyledText;
 
 pub(super) fn wrapped_line_count(text: &str, max_chars: usize) -> usize {

@@ -1,10 +1,10 @@
 use crate::{AppState, Question, QuestionRequest, update, workspace};
-use codeagent_core::{
+use crossbeam_channel::{Receiver, unbounded};
+use ferro_code_core::{
     Approval, ContextWindowUsage, ConversationItem, ItemKind, PersistedState, PlanUsage,
     truncate_text,
 };
-use codeagent_protocol::CodexBackend;
-use crossbeam_channel::{Receiver, unbounded};
+use ferro_code_protocol::CodexBackend;
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
@@ -182,7 +182,7 @@ impl Controller {
                         .activity_log
                         .push(format!("Updated Codex to {version}"));
                     self.state.info(format!(
-                        "Codex {version} installed. Restart CodeAgent to use it."
+                        "Codex {version} installed. Restart Ferro Code to use it."
                     ));
                 }
                 Err(error) => self.state.error(error),
@@ -372,7 +372,7 @@ impl Controller {
             let transcript = conversation_context(&self.state.conversation);
             if !transcript.is_empty() {
                 turn_text = format!(
-                    "Continue this locally saved CodeAgent conversation. Use the transcript as context; do not repeat it in your answer.\n\n<conversation_history>\n{transcript}\n</conversation_history>\n\nCurrent user request:\n{turn_text}"
+                    "Continue this locally saved Ferro Code conversation. Use the transcript as context; do not repeat it in your answer.\n\n<conversation_history>\n{transcript}\n</conversation_history>\n\nCurrent user request:\n{turn_text}"
                 );
             }
         }
@@ -398,7 +398,7 @@ impl Controller {
         if let Some(runtime_thread_id) = self.state.runtime_threads.get(&local_thread_id).cloned() {
             self.start_turn(local_thread_id, runtime_thread_id, turn);
         } else {
-            let mut params = json!({"cwd":turn.cwd,"ephemeral":true,"approvalPolicy":turn.approval_policy,"sandbox":turn.sandbox,"serviceName":"codeagent"});
+            let mut params = json!({"cwd":turn.cwd,"ephemeral":true,"approvalPolicy":turn.approval_policy,"sandbox":turn.sandbox,"serviceName":"ferro-code"});
             if !turn.model.is_empty() {
                 params["model"] = Value::String(turn.model.clone());
             }
@@ -514,7 +514,7 @@ impl Controller {
             "account/rateLimitResetCredit/consume",
             json!({
                 "creditId": credit_id,
-                "idempotencyKey": format!("codeagent-{}-{}", unix_timestamp_millis(), self.next_id)
+                "idempotencyKey": format!("ferro-code-{}-{}", unix_timestamp_millis(), self.next_id)
             }),
             PendingCall::ConsumeReset,
         );
@@ -555,7 +555,7 @@ impl Controller {
             Ok(backend) => {
                 self.backend = Some(backend);
                 self.state.connection_text = "Connecting…".into();
-                self.request("initialize", json!({"clientInfo":{"name":"codeagent","title":"CodeAgent","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true,"requestAttestation":false}}), PendingCall::Initialize);
+                self.request("initialize", json!({"clientInfo":{"name":"ferro-code","title":"Ferro Code","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true,"requestAttestation":false}}), PendingCall::Initialize);
             }
             Err(error) => {
                 self.startup_in_progress = false;
@@ -805,7 +805,7 @@ impl Controller {
                 "ephemeral": true,
                 "approvalPolicy": "never",
                 "sandbox": "read-only",
-                "serviceName": "codeagent-summary",
+                "serviceName": "ferro-code-summary",
                 "model": self.state.prefs.summary_model
             }),
             PendingCall::SummaryThreadStart(SummaryJob {
@@ -877,7 +877,7 @@ impl Controller {
                             .map(str::to_owned)
                     })
                     .collect();
-                Some(codeagent_core::ModelOption {
+                Some(ferro_code_core::ModelOption {
                     id,
                     display_name,
                     description: model
@@ -1050,7 +1050,7 @@ impl Controller {
                     .or_else(|| params.get("summary"))
                     .and_then(Value::as_str)
                     .unwrap_or("Codex reported a warning");
-                if !codeagent_core::is_skills_budget_warning(message) {
+                if !ferro_code_core::is_skills_budget_warning(message) {
                     self.state.error(message);
                 }
             }
@@ -1237,7 +1237,7 @@ impl Controller {
             "webSearch" => (ItemKind::Tool, "Web search".into(), value_to_text(item)),
             other => (
                 ItemKind::System,
-                codeagent_core::humanize(other),
+                ferro_code_core::humanize(other),
                 value_to_text(item),
             ),
         };

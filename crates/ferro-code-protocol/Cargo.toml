@@ -1,12 +1,11 @@
 [package]
-name = "codeagent-core"
+name = "ferro-code-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "UI-independent CodeAgent domain models and persistence"
+description = "Codex app-server JSONL transport for Ferro Code"
 
 [dependencies]
-serde.workspace = true
+crossbeam-channel.workspace = true
 serde_json.workspace = true
-

@@ -2,8 +2,8 @@ use crate::{
     MainWindow, OpenMethod, PendingAttachment, clipboard_file_paths, pending_attachment,
     sync_attachment_ui, sync_ui,
 };
-use codeagent_app::Controller;
-use codeagent_core::{ApprovalChoice, SandboxChoice};
+use ferro_code_app::Controller;
+use ferro_code_core::{ApprovalChoice, SandboxChoice};
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{ComponentHandle, SharedString, Timer};
 use std::{
@@ -391,7 +391,7 @@ pub(super) fn wire_callbacks(
     let search_ref = search.clone();
     ui.on_add_project(move || {
         if let Some(path) = rfd::FileDialog::new()
-            .set_title("Add a CodeAgent project")
+            .set_title("Add a Ferro Code project")
             .pick_folder()
         {
             controller_ref
