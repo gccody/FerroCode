@@ -106,6 +106,7 @@ export component ComposerEdit inherits Rectangle {
     in-out property <string> text <=> input.text;
     in property <string> placeholder-text;
     in property <bool> enabled: true;
+    out property <length> content-height: input.preferred-height;
     callback key-pressed(KeyEvent) -> EventResult;
     accessible-role: text-input;
     accessible-enabled: enabled;
@@ -121,14 +122,40 @@ export component ComposerEdit inherits Rectangle {
         overflow: elide;
         vertical-alignment: TextVerticalAlignment.center;
     }
-    input := TextInput {
-        width: parent.width; height: parent.height;
-        enabled: root.enabled;
-        color: #e2e2e5;
-        font-size: 12px;
-        wrap: word-wrap;
-        single-line: false;
-        key-pressed(event) => { root.key-pressed(event) }
+    edit-scroll := ScrollView {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: self.visible-width;
+        viewport-height: max(self.visible-height, input.preferred-height);
+        horizontal-scrollbar-policy: always-off;
+        vertical-scrollbar-policy: as-needed;
+
+        input := TextInput {
+            enabled: root.enabled;
+            color: #e2e2e5;
+            font-size: 12px;
+            wrap: word-wrap;
+            single-line: false;
+            page-height: edit-scroll.visible-height;
+            key-pressed(event) => { root.key-pressed(event) }
+            cursor-position-changed(position) => {
+                if position.y + edit-scroll.viewport-y < 0px {
+                    edit-scroll.viewport-y = min(
+                        0px,
+                        edit-scroll.visible-height - position.y - 20px,
+                        max(edit-scroll.visible-height - self.height, 0px - position.y)
+                    );
+                } else if position.y + edit-scroll.viewport-y > edit-scroll.visible-height - 20px {
+                    edit-scroll.viewport-y = min(
+                        0px,
+                        max(
+                            edit-scroll.visible-height - self.height,
+                            edit-scroll.visible-height - position.y - 20px
+                        )
+                    );
+                }
+            }
+        }
     }
 }
 
