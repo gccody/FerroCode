@@ -12,8 +12,9 @@ import {
 export component MainWindow inherits Window {
     title: "Ferro Code";
     icon: @image-url("../assets/app-icon.png");
-    no-frame: true;
-    resize-border-width: root.maximized ? 0px : 6px;
+    in property <bool> native-macos-window: false;
+    no-frame: !root.native-macos-window;
+    resize-border-width: root.native-macos-window || root.maximized ? 0px : 6px;
     preferred-width: 1440px; preferred-height: 900px;
     min-width: 500px; min-height: 640px;
     background: #0d0e10;
@@ -154,6 +155,7 @@ export component MainWindow inherits Window {
         spacing: 0px;
 
         AppHeader {
+            native-macos-window: root.native-macos-window;
             usage-left-label: root.usage-left-label;
             connected: root.connected;
             connection-text: root.connection-text;

@@ -86,6 +86,7 @@ component CloseButton inherits CaptionButton {
 }
 
 export component AppHeader inherits Rectangle {
+    in property <bool> native-macos-window: false;
     in property <string> usage-left-label: "";
     in property <bool> connected: false;
     in property <string> connection-text: "Starting Codex...";
@@ -108,7 +109,9 @@ export component AppHeader inherits Rectangle {
             background: transparent;
 
             HorizontalLayout {
-                padding-left: 11px;
+                // Native macOS traffic lights occupy the leading title-bar
+                // area. Keep the brand clear of them, as a native Mac app does.
+                padding-left: root.native-macos-window ? 78px : 11px;
                 spacing: 9px;
                 BrandMark {
                     width: 16px;
@@ -168,18 +171,18 @@ export component AppHeader inherits Rectangle {
             font-size: 11px;
             vertical-alignment: TextVerticalAlignment.center;
         }
-        MinimizeButton {
+        if !root.native-macos-window: MinimizeButton {
             native-hover: root.native-caption-hover;
             native-pressed: root.native-caption-pressed;
             clicked => { root.minimize(); }
         }
-        MaximizeButton {
+        if !root.native-macos-window: MaximizeButton {
             maximized: root.maximized;
             native-hover: root.native-caption-hover;
             native-pressed: root.native-caption-pressed;
             clicked => { root.toggle-maximize(); }
         }
-        CloseButton {
+        if !root.native-macos-window: CloseButton {
             native-hover: root.native-caption-hover;
             native-pressed: root.native-caption-pressed;
             clicked => { root.close(); }

@@ -9,8 +9,10 @@ use slint::{ComponentHandle, SharedString, Timer};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    time::Duration,
 };
+
+#[cfg(windows)]
+use std::time::Duration;
 
 #[cfg(windows)]
 use std::{
