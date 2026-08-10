@@ -86,6 +86,7 @@ export component MainWindow inherits Window {
     in property <[AttachmentRow]> attachments;
     in property <string> toast-text: "";
     in property <bool> toast-error: false;
+    in property <int> toast-revision: 0;
     in property <string> codex-update-version: "";
     in property <bool> codex-update-in-progress: false;
     in-out property <int> caption-hover: 0;
@@ -130,6 +131,7 @@ export component MainWindow inherits Window {
     callback set-respect-gitignore(bool);
     callback set-github-private-repositories(bool);
     callback set-visible-thread-limit(int);
+    callback dismiss-toast(int);
     callback drag-window;
 
     public function clear-input-focus() {
@@ -308,6 +310,8 @@ export component MainWindow inherits Window {
         y: 55px;
         message: root.toast-text;
         error: root.toast-error;
+        revision: root.toast-revision;
+        dismiss(revision) => { root.dismiss-toast(revision); }
     }
 
     if root.startup-loading: LoadingOverlay {

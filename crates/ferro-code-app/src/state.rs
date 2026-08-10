@@ -53,6 +53,7 @@ pub struct AppState {
     pub user_question: Option<QuestionRequest>,
     pub user_question_queue: VecDeque<QuestionRequest>,
     pub toast: Option<Toast>,
+    pub toast_revision: u64,
     pub codex_update_version: Option<String>,
     pub codex_update_in_progress: bool,
     pub activity_log: Vec<String>,
@@ -89,6 +90,7 @@ impl AppState {
             user_question: None,
             user_question_queue: VecDeque::new(),
             toast: None,
+            toast_revision: 0,
             codex_update_version: None,
             codex_update_in_progress: false,
             activity_log: vec!["Ferro Code launched".into()],
@@ -464,6 +466,7 @@ impl AppState {
             message,
             is_error: true,
         });
+        self.toast_revision = self.toast_revision.wrapping_add(1);
         self.touch();
     }
 
@@ -472,7 +475,14 @@ impl AppState {
             message: message.into(),
             is_error: false,
         });
+        self.toast_revision = self.toast_revision.wrapping_add(1);
         self.touch();
+    }
+
+    pub fn dismiss_toast(&mut self, revision: u32) {
+        if self.toast_revision as u32 == revision && self.toast.take().is_some() {
+            self.touch();
+        }
     }
 }
 
@@ -599,6 +609,22 @@ mod tests {
             state.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("First line second line")
         );
+    }
+
+    #[test]
+    fn toast_revisions_reset_timeout_and_ignore_stale_dismissals() {
+        let mut state = state();
+        state.info("Saved");
+        let first_revision = state.toast_revision as u32;
+        state.info("Saved");
+        let second_revision = state.toast_revision as u32;
+
+        assert_ne!(first_revision, second_revision);
+        state.dismiss_toast(first_revision);
+        assert!(state.toast.is_some());
+
+        state.dismiss_toast(second_revision);
+        assert!(state.toast.is_none());
     }
 
     #[test]

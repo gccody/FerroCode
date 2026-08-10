@@ -289,13 +289,44 @@ export component QuestionsOverlay inherits Rectangle {
 export component ToastOverlay inherits Rectangle {
     in property <string> message;
     in property <bool> error: false;
+    in property <int> revision: 0;
+    callback dismiss(int);
+
+    private property <bool> fading: false;
 
     height: 42px;
     clip: true;
+    opacity: root.fading ? 0 : 1;
+    animate opacity { duration: 450ms; easing: ease-out; }
     border-radius: 8px;
     background: root.error ? #4a2229 : #1f3b31;
     border-width: 1px; border-color: root.error ? #f26270 : #4ccd91;
     Text { x: 13px; width: parent.width - 26px; height: parent.height; text: root.message; color: #f2f2f4; font-size: 11px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+
+    changed revision => {
+        root.fading = false;
+        dismiss-timer.stop();
+        fade-timer.restart();
+    }
+
+    fade-timer := Timer {
+        interval: 3500ms;
+        running: true;
+        triggered => {
+            self.stop();
+            root.fading = true;
+            dismiss-timer.start();
+        }
+    }
+
+    dismiss-timer := Timer {
+        interval: 450ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.dismiss(root.revision);
+        }
+    }
 }
 
 export component LoadingOverlay inherits Rectangle {

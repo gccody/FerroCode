@@ -38,7 +38,7 @@ pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     } else if state.git_status.has_unpushed_commits {
         ("Push", state.git_status.github_configured)
     } else {
-        ("Up to date", false)
+        ("Up to Date", false)
     };
     ui.set_git_action_label(git_label.into());
     ui.set_git_action_enabled(git_enabled);
@@ -307,6 +307,7 @@ pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     if let Some(toast) = &state.toast {
         ui.set_toast_text(toast.message.clone().into());
         ui.set_toast_error(toast.is_error);
+        ui.set_toast_revision(state.toast_revision as i32);
     } else {
         ui.set_toast_text("".into());
     }
