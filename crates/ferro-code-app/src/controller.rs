@@ -385,14 +385,7 @@ impl Controller {
         );
         local.body = text.clone();
         local.status = "completed".into();
-        if !attachments.is_empty() {
-            let names = attachments
-                .iter()
-                .map(|path| attachment_name(path))
-                .collect::<Vec<_>>()
-                .join(", ");
-            local.body.push_str(&format!("\n\nAttached: {names}"));
-        }
+        local.attachments.clone_from(&attachments);
         self.state.conversation.push(local);
         if let Some(thread) = self
             .state
@@ -1604,11 +1597,7 @@ fn attachment_input(path: String) -> Value {
 }
 
 fn attachment_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(path)
-        .to_owned()
+    path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned()
 }
 
 fn has_extension(path: &str, extensions: &[&str]) -> bool {
@@ -1970,5 +1959,21 @@ mod tests {
             attachment_input(r"C:\tmp\notes.pdf".into()),
             json!({"type":"mention","name":"notes.pdf","path":r"C:\tmp\notes.pdf"})
         );
+    }
+
+    #[test]
+    fn sent_messages_retain_attachment_paths_for_the_ui() {
+        let mut controller = Controller::new(PersistedState::default());
+        controller.state.add_project("demo".into(), 1);
+        controller.state.new_thread(2);
+        controller.state.connected = true;
+
+        controller.send_prompt("Describe this".into(), vec!["/tmp/screenshot.png".into()]);
+
+        assert_eq!(
+            controller.state.conversation[0].attachments,
+            ["/tmp/screenshot.png"]
+        );
+        assert_eq!(controller.state.conversation[0].body, "Describe this");
     }
 }

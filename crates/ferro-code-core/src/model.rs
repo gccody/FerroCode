@@ -130,6 +130,10 @@ pub struct ConversationItem {
     pub summary: Option<String>,
     #[serde(default)]
     pub duration_ms: Option<u64>,
+    /// Local paths for files submitted with this user message. The desktop
+    /// client uses image paths to restore sent-message thumbnails.
+    #[serde(default)]
+    pub attachments: Vec<String>,
 }
 
 impl ConversationItem {
@@ -145,6 +149,7 @@ impl ConversationItem {
             response_details_collapsed: false,
             summary: None,
             duration_ms: None,
+            attachments: Vec::new(),
         }
     }
 }
@@ -543,6 +548,21 @@ mod tests {
         let decoded: AppHistory =
             serde_json::from_str(&serde_json::to_string(&history).unwrap()).unwrap();
         assert_eq!(decoded, history);
+    }
+
+    #[test]
+    fn older_conversation_items_default_to_no_attachments() {
+        let item: ConversationItem = serde_json::from_value(serde_json::json!({
+            "id": "message",
+            "kind": "User",
+            "title": "You",
+            "body": "Hello",
+            "status": "completed",
+            "collapsed": false
+        }))
+        .unwrap();
+
+        assert!(item.attachments.is_empty());
     }
 
     #[test]

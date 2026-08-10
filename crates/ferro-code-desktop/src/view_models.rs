@@ -1,6 +1,6 @@
 use crate::{
-    MainWindow, MarkdownBlock, MessageRow, ProjectRow, QuestionRow, ThreadRow, markdown_blocks,
-    wrapped_line_count,
+    MainWindow, MarkdownBlock, MessageRow, ProjectRow, QuestionRow, ThreadRow, attachment_rows,
+    markdown_blocks, wrapped_line_count,
 };
 use ferro_code_app::{AppState, Question};
 use ferro_code_core::{ConversationItem, ItemKind};
@@ -58,7 +58,12 @@ pub(super) fn message_height(item: &ConversationItem, markdown_blocks: &[Markdow
     if item.kind == ItemKind::User {
         const MAX_CHARS: usize = 92;
         let lines = wrapped_line_count(&item.body, MAX_CHARS);
-        return (lines as f32 * 17.0 + 26.0).max(48.0);
+        let attachment_height = if item.attachments.is_empty() {
+            0.0
+        } else {
+            82.0
+        };
+        return (lines as f32 * 17.0 + 26.0).max(48.0) + attachment_height;
     }
 
     let content_height = markdown_blocks
@@ -397,6 +402,7 @@ fn message_row(item: &ConversationItem) -> MessageRow {
         title: activity_title(item).into(),
         body: item.body.clone().into(),
         markdown_blocks: model(markdown_blocks),
+        attachments: model(attachment_rows(&item.attachments)),
         status: item.status.clone().into(),
         user: item.kind == ItemKind::User,
         activity: matches!(
@@ -433,6 +439,7 @@ fn activity_group_summary_row(
         title: format!("{tool_call_count} tool calls").into(),
         body: "".into(),
         markdown_blocks: model(Vec::<MarkdownBlock>::new()),
+        attachments: model(Vec::new()),
         status: latest.status.clone().into(),
         user: false,
         activity: false,
@@ -458,6 +465,7 @@ fn response_summary_row(final_answer: &ConversationItem) -> MessageRow {
         title: format!("Worked for {duration_label}").into(),
         body: "".into(),
         markdown_blocks: model(Vec::<MarkdownBlock>::new()),
+        attachments: model(Vec::new()),
         status: "completed".into(),
         user: false,
         activity: false,

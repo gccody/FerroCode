@@ -67,6 +67,25 @@ fn user_message_height_grows_with_wrapped_content() {
 }
 
 #[test]
+fn user_message_rows_include_sent_image_thumbnails() {
+    let mut message = ConversationItem::new("image", ItemKind::User, "User");
+    message.body = "What does this look like?".into();
+    let text_only_height = message_height(&message, &[]);
+    message.attachments = vec![format!(
+        "{}/assets/app-icon.png",
+        env!("CARGO_MANIFEST_DIR")
+    )];
+
+    let rows = message_rows(&[message]);
+    let attachment = rows[0].attachments.row_data(0).unwrap();
+
+    assert_eq!(rows[0].attachments.row_count(), 1);
+    assert_eq!(attachment.name.as_str(), "app-icon.png");
+    assert!(attachment.image);
+    assert_eq!(rows[0].row_height, text_only_height + 82.0);
+}
+
+#[test]
 fn explicit_lines_and_wrapping_increase_message_row_height() {
     let mut multiline = ConversationItem::new("multiline", ItemKind::User, "User");
     multiline.body = "first\nsecond\nthird".into();
