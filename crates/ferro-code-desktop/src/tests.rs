@@ -129,6 +129,50 @@ fn activity_items_use_compact_rows_and_past_tense_when_finished() {
 }
 
 #[test]
+fn consecutive_tool_calls_collapse_into_one_count_and_can_expand() {
+    let user = ConversationItem::new("user", ItemKind::User, "You");
+    let mut first = ConversationItem::new("first", ItemKind::Command, "cargo check");
+    first.status = "completed".into();
+    first.collapsed = true;
+    let mut hidden_reasoning = ConversationItem::new("reasoning", ItemKind::Reasoning, "Reasoning");
+    hidden_reasoning.status = "completed".into();
+    let latest = ConversationItem::new("latest", ItemKind::Tool, "Inspector");
+
+    let collapsed = message_rows(&[
+        user.clone(),
+        first.clone(),
+        hidden_reasoning.clone(),
+        latest.clone(),
+    ]);
+    assert_eq!(collapsed.len(), 2);
+    assert_eq!(collapsed[0].id.as_str(), "user");
+    assert!(collapsed[1].activity_group_summary);
+    assert_eq!(collapsed[1].title.as_str(), "2 tool calls");
+    assert_eq!(collapsed[1].group_id.as_str(), "latest");
+    assert!(collapsed[1].collapsed);
+
+    first.activity_group_expanded = true;
+    let expanded = message_rows(&[user, first, hidden_reasoning, latest]);
+    assert_eq!(expanded.len(), 4);
+    assert!(expanded[1].activity_group_summary);
+    assert!(!expanded[1].collapsed);
+    assert_eq!(expanded[2].id.as_str(), "first");
+    assert_eq!(expanded[3].id.as_str(), "latest");
+}
+
+#[test]
+fn assistant_commentary_splits_tool_call_groups() {
+    let user = ConversationItem::new("user", ItemKind::User, "You");
+    let first = ConversationItem::new("first", ItemKind::Command, "cargo check");
+    let commentary = ConversationItem::new("commentary", ItemKind::Assistant, "Codex");
+    let second = ConversationItem::new("second", ItemKind::Tool, "Inspector");
+
+    let rows = message_rows(&[user, first, commentary, second]);
+    assert_eq!(rows.len(), 4);
+    assert!(!rows.iter().any(|row| row.activity_group_summary));
+}
+
+#[test]
 fn completed_responses_collapse_into_one_summary_above_the_final_answer() {
     let user = ConversationItem::new("user", ItemKind::User, "You");
     let commentary = ConversationItem::new("commentary", ItemKind::Assistant, "Codex");

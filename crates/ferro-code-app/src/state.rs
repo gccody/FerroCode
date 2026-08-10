@@ -409,6 +409,54 @@ impl AppState {
         true
     }
 
+    pub fn toggle_activity_group(&mut self, id: &str) -> bool {
+        let Some(anchor) = self
+            .conversation
+            .iter()
+            .position(|item| item.id == id && is_activity_item(item))
+        else {
+            return false;
+        };
+
+        let mut start = anchor;
+        while start > 0 {
+            let previous = &self.conversation[start - 1];
+            if is_activity_item(previous) || is_hidden_activity_separator(previous) {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+        let mut end = anchor + 1;
+        while end < self.conversation.len() {
+            let next = &self.conversation[end];
+            if is_activity_item(next) || is_hidden_activity_separator(next) {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        let activity_count = self.conversation[start..end]
+            .iter()
+            .filter(|item| is_activity_item(item))
+            .count();
+        if activity_count < 2 {
+            return false;
+        }
+
+        let expanded = !self.conversation[start..end]
+            .iter()
+            .filter(|item| is_activity_item(item))
+            .any(|item| item.activity_group_expanded);
+        for item in &mut self.conversation[start..end] {
+            if is_activity_item(item) {
+                item.activity_group_expanded = expanded;
+            }
+        }
+        self.touch();
+        true
+    }
+
     pub fn toggle_response_details(&mut self, id: &str) -> bool {
         let Some(item) = self
             .conversation
@@ -484,6 +532,23 @@ impl AppState {
             self.touch();
         }
     }
+}
+
+fn is_activity_item(item: &ConversationItem) -> bool {
+    matches!(
+        item.kind,
+        ferro_code_core::ItemKind::Command
+            | ferro_code_core::ItemKind::Tool
+            | ferro_code_core::ItemKind::FileChange
+            | ferro_code_core::ItemKind::Plan
+            | ferro_code_core::ItemKind::System
+    )
+}
+
+fn is_hidden_activity_separator(item: &ConversationItem) -> bool {
+    item.kind == ferro_code_core::ItemKind::Reasoning
+        && item.body.trim().is_empty()
+        && item.status != "running"
 }
 
 fn collapse_response_details(
@@ -843,6 +908,35 @@ mod tests {
         assert!(state.conversation[1].collapsed);
         assert!(state.toggle_message("tool"));
         assert!(!state.conversation[1].collapsed);
+    }
+
+    #[test]
+    fn consecutive_activity_groups_can_be_expanded_and_recollapsed() {
+        let mut state = state();
+        state.add_project(r"C:\Code\Demo".into(), 1);
+        state.new_thread(2).unwrap();
+        state.conversation.extend([
+            ConversationItem::new("user", ItemKind::User, "You"),
+            ConversationItem::new("first", ItemKind::Command, "cargo check"),
+            {
+                let mut reasoning =
+                    ConversationItem::new("reasoning", ItemKind::Reasoning, "Reasoning");
+                reasoning.status = "completed".into();
+                reasoning
+            },
+            ConversationItem::new("latest", ItemKind::Tool, "Inspector"),
+        ]);
+
+        assert!(state.toggle_activity_group("latest"));
+        assert!(state.conversation[1].activity_group_expanded);
+        assert!(!state.conversation[2].activity_group_expanded);
+        assert!(state.conversation[3].activity_group_expanded);
+
+        assert!(state.toggle_activity_group("latest"));
+        assert!(!state.conversation[1].activity_group_expanded);
+        assert!(!state.conversation[2].activity_group_expanded);
+        assert!(!state.conversation[3].activity_group_expanded);
+        assert!(!state.toggle_activity_group("user"));
     }
 
     #[test]

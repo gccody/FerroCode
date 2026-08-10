@@ -110,6 +110,7 @@ export component MainWindow inherits Window {
     callback copy-code(string);
     callback copy-response(string);
     callback toggle-message(string);
+    callback toggle-activity-group(string);
     callback toggle-response-details(string);
     callback select-model(string);
     callback select-effort(string);
@@ -230,6 +231,7 @@ export component MainWindow inherits Window {
                 copy-code(text) => { root.copy-code(text); }
                 copy-response(text) => { root.copy-response(text); }
                 toggle-message(id) => { root.toggle-message(id); }
+                toggle-activity-group(id) => { root.toggle-activity-group(id); }
                 toggle-response-details(id) => { root.toggle-response-details(id); }
                 select-model(value) => { root.select-model(value); }
                 select-effort(value) => { root.select-effort(value); }

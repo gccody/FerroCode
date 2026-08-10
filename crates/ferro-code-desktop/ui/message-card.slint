@@ -7,6 +7,7 @@ export component MessageCard inherits Rectangle {
     callback copy-code(string);
     callback copy-response(string);
     callback toggle-message(string);
+    callback toggle-activity-group(string);
     callback toggle-response-details(string);
     horizontal-stretch: 1;
     private property <length> content-height: message.activity && !message.collapsed && message.body != ""
@@ -76,6 +77,34 @@ export component MessageCard inherits Rectangle {
         vertical-alignment: TextVerticalAlignment.top;
     }
 
+    if message.activity-group-summary: Rectangle {
+        x: 8px; width: parent.width - 16px; height: root.content-height;
+        border-radius: 5px;
+        background: group-touch.has-hover ? #1d1e23 : transparent;
+        Path {
+            x: 6px; y: (parent.height - 10px) / 2; width: 10px; height: 10px;
+            commands: message.collapsed ? "M 2 1 L 6 5 L 2 9" : "M 1 2 L 4.5 6 L 8 2";
+            viewbox-width: 10; viewbox-height: 10;
+            fill: transparent; stroke: #858790; stroke-width: 1.6px;
+            stroke-line-cap: round; stroke-line-join: round;
+        }
+        Text {
+            x: 26px; width: parent.width - 34px; height: parent.height;
+            text: message.title;
+            color: group-touch.has-hover ? #dedee2 : #b8b9c0;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: TextVerticalAlignment.center;
+            overflow: elide;
+        }
+        accessible-role: button;
+        accessible-label: (message.collapsed ? "Expand " : "Collapse ") + message.title;
+        group-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.toggle-activity-group(message.group-id); }
+        }
+    }
+
     if message.response-summary: Rectangle {
         x: 8px; width: parent.width - 16px; height: root.content-height;
         summary-label := Text {
@@ -105,7 +134,7 @@ export component MessageCard inherits Rectangle {
         }
     }
 
-    if !message.user && !message.activity && !message.response-summary: VerticalLayout {
+    if !message.user && !message.activity && !message.activity-group-summary && !message.response-summary: VerticalLayout {
         width: parent.width; height: root.content-height;
         padding-left: 8px; padding-right: 8px; padding-top: 5px; padding-bottom: 5px;
         spacing: 7px;
