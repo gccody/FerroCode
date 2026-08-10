@@ -352,6 +352,10 @@ impl Controller {
         self.state.toggle_message(id);
     }
 
+    pub fn toggle_activity_group(&mut self, id: &str) {
+        self.state.toggle_activity_group(id);
+    }
+
     pub fn toggle_response_details(&mut self, id: &str) {
         self.state.toggle_response_details(id);
     }

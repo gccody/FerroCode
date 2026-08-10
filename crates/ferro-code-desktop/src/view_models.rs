@@ -214,6 +214,8 @@ pub(super) fn update_message_rows(current: &VecModel<MessageRow>, next: Vec<Mess
         .any(|(index, row)| {
             current.row_data(index).is_some_and(|current| {
                 current.collapsed != row.collapsed
+                    || current.activity_group_summary != row.activity_group_summary
+                    || current.group_id != row.group_id
                     || current.response_summary != row.response_summary
                     || current.response_id != row.response_id
             })
@@ -252,6 +254,8 @@ pub(super) fn message_rows_match(current: &MessageRow, next: &MessageRow) -> boo
         && current.user == next.user
         && current.activity == next.activity
         && current.collapsed == next.collapsed
+        && current.activity_group_summary == next.activity_group_summary
+        && current.group_id == next.group_id
         && current.response_summary == next.response_summary
         && current.response_id == next.response_id
         && current.duration_label == next.duration_label
@@ -281,10 +285,13 @@ pub(super) fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
     let mut index = 0;
     while index < items.len() {
         if items[index].kind != ItemKind::User {
-            if message_is_visible(&items[index]) {
-                rows.push(message_row(&items[index]));
-            }
-            index += 1;
+            let segment_end = items[index..]
+                .iter()
+                .position(|item| item.kind == ItemKind::User)
+                .map(|offset| index + offset)
+                .unwrap_or(items.len());
+            push_grouped_message_rows(&mut rows, items[index..segment_end].iter());
+            index = segment_end;
             continue;
         }
 
@@ -306,30 +313,19 @@ pub(super) fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
             if has_details {
                 rows.push(response_summary_row(&items[final_answer]));
                 if !items[final_answer].response_details_collapsed {
-                    rows.extend(
+                    push_grouped_message_rows(
+                        &mut rows,
                         (response_start..response_end)
-                            .filter(|detail| {
-                                *detail != final_answer && message_is_visible(&items[*detail])
-                            })
-                            .map(|detail| message_row(&items[detail])),
+                            .filter(|detail| *detail != final_answer)
+                            .map(|detail| &items[detail]),
                     );
                 }
                 rows.push(message_row(&items[final_answer]));
             } else {
-                rows.extend(
-                    items[response_start..response_end]
-                        .iter()
-                        .filter(|item| message_is_visible(item))
-                        .map(message_row),
-                );
+                push_grouped_message_rows(&mut rows, items[response_start..response_end].iter());
             }
         } else {
-            rows.extend(
-                items[response_start..response_end]
-                    .iter()
-                    .filter(|item| message_is_visible(item))
-                    .map(message_row),
-            );
+            push_grouped_message_rows(&mut rows, items[response_start..response_end].iter());
         }
         index = response_end;
     }
@@ -341,8 +337,55 @@ pub(super) fn message_rows(items: &[ConversationItem]) -> Vec<MessageRow> {
     rows
 }
 
+fn push_grouped_message_rows<'a>(
+    rows: &mut Vec<MessageRow>,
+    items: impl IntoIterator<Item = &'a ConversationItem>,
+) {
+    let items = items
+        .into_iter()
+        .filter(|item| message_is_visible(item))
+        .collect::<Vec<_>>();
+    let mut index = 0;
+    while index < items.len() {
+        if !is_activity_item(items[index]) {
+            rows.push(message_row(items[index]));
+            index += 1;
+            continue;
+        }
+
+        let mut end = index + 1;
+        while end < items.len() && is_activity_item(items[end]) {
+            end += 1;
+        }
+        let group = &items[index..end];
+        if group.len() == 1 {
+            rows.push(message_row(group[0]));
+        } else {
+            let expanded = group.iter().any(|item| item.activity_group_expanded);
+            if let Some(latest) = group.last() {
+                rows.push(activity_group_summary_row(latest, group.len(), expanded));
+            }
+            if expanded {
+                rows.extend(group.iter().map(|item| message_row(item)));
+            }
+        }
+        index = end;
+    }
+}
+
 fn message_is_visible(item: &ConversationItem) -> bool {
     !(item.kind == ItemKind::Reasoning && item.body.trim().is_empty() && item.status != "running")
+}
+
+fn is_activity_item(item: &ConversationItem) -> bool {
+    matches!(
+        item.kind,
+        ItemKind::Command
+            | ItemKind::FileChange
+            | ItemKind::Tool
+            | ItemKind::Plan
+            | ItemKind::System
+    )
 }
 
 fn message_row(item: &ConversationItem) -> MessageRow {
@@ -365,6 +408,8 @@ fn message_row(item: &ConversationItem) -> MessageRow {
                 | ItemKind::System
         ),
         collapsed: item.collapsed,
+        activity_group_summary: false,
+        group_id: "".into(),
         response_summary: false,
         response_id: "".into(),
         duration_label: item
@@ -373,6 +418,31 @@ fn message_row(item: &ConversationItem) -> MessageRow {
             .unwrap_or_default()
             .into(),
         row_height,
+        scroll_offset: 0.0,
+    }
+}
+
+fn activity_group_summary_row(
+    latest: &ConversationItem,
+    tool_call_count: usize,
+    expanded: bool,
+) -> MessageRow {
+    MessageRow {
+        id: format!("activity-group-{}", latest.id).into(),
+        kind: "activity-group".into(),
+        title: format!("{tool_call_count} tool calls").into(),
+        body: "".into(),
+        markdown_blocks: model(Vec::<MarkdownBlock>::new()),
+        status: latest.status.clone().into(),
+        user: false,
+        activity: false,
+        collapsed: !expanded,
+        activity_group_summary: true,
+        group_id: latest.id.clone().into(),
+        response_summary: false,
+        response_id: "".into(),
+        duration_label: "".into(),
+        row_height: 34.0,
         scroll_offset: 0.0,
     }
 }
@@ -392,6 +462,8 @@ fn response_summary_row(final_answer: &ConversationItem) -> MessageRow {
         user: false,
         activity: false,
         collapsed: final_answer.response_details_collapsed,
+        activity_group_summary: false,
+        group_id: "".into(),
         response_summary: true,
         response_id: final_answer.id.clone().into(),
         duration_label: duration_label.into(),

@@ -123,6 +123,8 @@ pub struct ConversationItem {
     pub status: String,
     pub collapsed: bool,
     #[serde(default)]
+    pub activity_group_expanded: bool,
+    #[serde(default)]
     pub response_details_collapsed: bool,
     #[serde(default)]
     pub summary: Option<String>,
@@ -139,6 +141,7 @@ impl ConversationItem {
             body: String::new(),
             status: "running".into(),
             collapsed: false,
+            activity_group_expanded: false,
             response_details_collapsed: false,
             summary: None,
             duration_ms: None,

@@ -522,6 +522,13 @@ pub(super) fn wire_callbacks(
         ui,
         controller,
         search,
+        MainWindow::on_toggle_activity_group,
+        |controller, value| controller.toggle_activity_group(value),
+    );
+    callback_with_string(
+        ui,
+        controller,
+        search,
         MainWindow::on_toggle_response_details,
         |controller, value| controller.toggle_response_details(value),
     );
