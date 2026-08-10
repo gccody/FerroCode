@@ -1,6 +1,14 @@
 use crate::{AttachmentRow, MainWindow, model};
 use slint::Image;
-use std::path::{Path, PathBuf};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
+
+thread_local! {
+    static SENT_IMAGE_PREVIEWS: RefCell<HashMap<PathBuf, Image>> = RefCell::new(HashMap::new());
+}
 
 #[derive(Clone)]
 pub(super) struct PendingAttachment {
@@ -43,6 +51,40 @@ pub(super) fn sync_attachment_ui(ui: &MainWindow, attachments: &[PendingAttachme
             })
             .collect::<Vec<_>>(),
     ));
+}
+
+pub(super) fn attachment_rows(paths: &[String]) -> Vec<AttachmentRow> {
+    paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let attachment_path = PathBuf::from(path);
+            let is_image = is_image_path(&attachment_path);
+            let preview = if is_image {
+                SENT_IMAGE_PREVIEWS.with(|previews| {
+                    let mut previews = previews.borrow_mut();
+                    previews
+                        .entry(attachment_path.clone())
+                        .or_insert_with(|| {
+                            Image::load_from_path(&attachment_path).unwrap_or_default()
+                        })
+                        .clone()
+                })
+            } else {
+                Image::default()
+            };
+            AttachmentRow {
+                index: index.min(i32::MAX as usize) as i32,
+                name: attachment_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Attachment")
+                    .into(),
+                preview,
+                image: is_image,
+            }
+        })
+        .collect()
 }
 
 pub(super) fn is_image_path(path: &Path) -> bool {

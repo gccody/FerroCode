@@ -16,8 +16,10 @@ export struct MarkdownBlock {
     table-rows: [MarkdownTableRow]
 }
 
+export struct AttachmentRow { index: int, name: string, preview: image, image: bool }
+
 export struct MessageRow {
-    id: string, kind: string, title: string, body: string, markdown-blocks: [MarkdownBlock], status: string,
+    id: string, kind: string, title: string, body: string, markdown-blocks: [MarkdownBlock], attachments: [AttachmentRow], status: string,
     user: bool, activity: bool, collapsed: bool, activity-group-summary: bool, group-id: string,
     response-summary: bool, response-id: string,
     duration-label: string, row-height: length, scroll-offset: length
@@ -36,7 +38,5 @@ export struct QuestionRow {
     index: int, header: string, question: string, answer: string, secret: bool,
     option-count: int, option-a: string, option-b: string, option-c: string
 }
-
-export struct AttachmentRow { index: int, name: string, preview: image, image: bool }
 
 export struct OpenMethodRow { label: string, icon: image, has-icon: bool }
