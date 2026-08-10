@@ -4,7 +4,7 @@ import { AttachmentRow, MessageRow, OpenMethodRow } from "types.slint";
 import { BrandMark, InspectorMark, SendMark, StopMark } from "icons.slint";
 import {
     AttachmentPreview, ComposerAttachButton, ComposerComboBox, ComposerEdit, ContextIndicator,
-    OpenProjectButton,
+    GitActionButton, OpenProjectButton,
 } from "controls.slint";
 import { MessageCard } from "message-card.slint";
 
@@ -29,6 +29,10 @@ export component ConversationPane inherits Rectangle {
     in property <[string]> effort-names;
     in property <[string]> sandbox-names;
     in property <[OpenMethodRow]> open-project-methods;
+    in property <bool> git-installed: false;
+    in property <string> git-action-label: "Git";
+    in property <bool> git-action-enabled: false;
+    in property <bool> git-action-busy: false;
     in-out property <int> selected-model-index: 0;
     in-out property <int> selected-effort-index: 0;
     in-out property <int> selected-sandbox-index: 1;
@@ -46,6 +50,7 @@ export component ConversationPane inherits Rectangle {
     callback select-effort(string);
     callback select-sandbox(string);
     callback open-project(string);
+    callback git-action;
 
     horizontal-stretch: 1;
     background: #0d0e10;
@@ -157,6 +162,13 @@ export component ConversationPane inherits Rectangle {
                 }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: root.workspace-path; color: #8d8f97; font-size: 10px; vertical-alignment: TextVerticalAlignment.center; overflow: elide; }
+                if root.git-installed: GitActionButton {
+                    y: (parent.height - self.height) / 2;
+                    text: root.git-action-label;
+                    enabled: root.git-action-enabled;
+                    busy: root.git-action-busy;
+                    clicked => { root.git-action(); }
+                }
                 OpenProjectButton {
                     y: (parent.height - self.height) / 2;
                     methods: root.open-project-methods;

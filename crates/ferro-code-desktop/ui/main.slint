@@ -31,6 +31,11 @@ export component MainWindow inherits Window {
     in property <[string]> sandbox-names;
     in property <[string]> approval-names;
     in property <[OpenMethodRow]> open-project-methods;
+    in property <bool> git-installed: false;
+    in property <bool> github-configured: false;
+    in property <string> git-action-label: "Git";
+    in property <bool> git-action-enabled: false;
+    in property <bool> git-action-busy: false;
     in property <string> connection-text: "Starting Codex...";
     in property <bool> connected: false;
     in-out property <bool> startup-loading: true;
@@ -54,6 +59,7 @@ export component MainWindow inherits Window {
     in-out property <int> inspector-tab: 0;
     in-out property <bool> settings-visible: false;
     in-out property <bool> respect-gitignore: true;
+    in-out property <bool> github-private-repositories: true;
     in-out property <int> visible-thread-limit: 5;
     in-out property <bool> show-all-threads: false;
     in property <int> change-count: 0;
@@ -87,6 +93,7 @@ export component MainWindow inherits Window {
 
     callback add-project;
     callback open-project(string);
+    callback git-action;
     callback select-project(string);
     callback toggle-project(string);
     callback new-thread;
@@ -121,6 +128,7 @@ export component MainWindow inherits Window {
     callback update-codex;
     callback set-inspector(bool);
     callback set-respect-gitignore(bool);
+    callback set-github-private-repositories(bool);
     callback set-visible-thread-limit(int);
     callback drag-window;
 
@@ -205,6 +213,10 @@ export component MainWindow inherits Window {
                 effort-names: root.effort-names;
                 sandbox-names: root.sandbox-names;
                 open-project-methods: root.open-project-methods;
+                git-installed: root.git-installed;
+                git-action-label: root.git-action-label;
+                git-action-enabled: root.git-action-enabled;
+                git-action-busy: root.git-action-busy;
                 selected-model-index <=> root.selected-model-index;
                 selected-effort-index <=> root.selected-effort-index;
                 selected-sandbox-index <=> root.selected-sandbox-index;
@@ -221,6 +233,7 @@ export component MainWindow inherits Window {
                 select-effort(value) => { root.select-effort(value); }
                 select-sandbox(value) => { root.select-sandbox(value); }
                 open-project(value) => { root.open-project(value); }
+                git-action => { root.git-action(); }
             }
 
             if root.inspector-visible: InspectorPanel {
@@ -253,6 +266,9 @@ export component MainWindow inherits Window {
         visible-thread-limit <=> root.visible-thread-limit;
         show-all-threads <=> root.show-all-threads;
         respect-gitignore <=> root.respect-gitignore;
+        git-installed: root.git-installed;
+        github-configured: root.github-configured;
+        github-private-repositories <=> root.github-private-repositories;
         account-label: root.account-label;
         plan-label: root.plan-label;
         usage-summary: root.usage-summary;
@@ -267,6 +283,8 @@ export component MainWindow inherits Window {
         select-summary-effort(value) => { root.select-summary-effort(value); }
         set-visible-thread-limit(value) => { root.set-visible-thread-limit(value); }
         set-respect-gitignore(value) => { root.set-respect-gitignore(value); }
+        set-github-private-repositories(value) => { root.set-github-private-repositories(value); }
+        refresh-source-control => { root.refresh-workspace(); }
         refresh-usage => { root.refresh-usage(); }
         consume-reset => { root.consume-reset(); }
     }

@@ -18,6 +18,9 @@ export component SettingsOverlay inherits Rectangle {
     in-out property <int> visible-thread-limit: 5;
     in-out property <bool> show-all-threads: false;
     in-out property <bool> respect-gitignore: true;
+    in property <bool> git-installed: false;
+    in property <bool> github-configured: false;
+    in-out property <bool> github-private-repositories: true;
     in property <string> account-label: "";
     in property <string> plan-label: "";
     in property <string> usage-summary: "Usage information unavailable";
@@ -33,6 +36,8 @@ export component SettingsOverlay inherits Rectangle {
     callback select-summary-effort(string);
     callback set-visible-thread-limit(int);
     callback set-respect-gitignore(bool);
+    callback set-github-private-repositories(bool);
+    callback refresh-source-control;
     callback refresh-usage;
     callback consume-reset;
 
@@ -91,6 +96,80 @@ export component SettingsOverlay inherits Rectangle {
                         color: #858790;
                         font-size: 10px;
                         wrap: word-wrap;
+                    }
+                    Rectangle { height: 1px; background: #2b2d33; }
+                    SectionTitle { text: "SOURCE CONTROL"; color: #a995ff; }
+                    if !root.git-installed: Rectangle {
+                        height: 48px;
+                        border-radius: 7px;
+                        border-width: 1px;
+                        border-color: #6f3c43;
+                        background: #2b1c20;
+                        Text {
+                            x: 10px; y: 6px; width: parent.width - 20px; height: parent.height - 12px;
+                            text: "Git is not installed. Install Git and restart Ferro Code to enable source control.";
+                            color: #ef9ca5;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                    }
+                    if root.git-installed: Rectangle {
+                        height: 43px;
+                        Text {
+                            x: 0px; y: 0px; height: 18px;
+                            text: "GitHub";
+                            color: #c9cad0;
+                            font-size: 11px;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                        Text {
+                            x: 0px; y: 20px; width: parent.width; height: 18px;
+                            text: root.github-configured
+                                ? "Configured through the authenticated GitHub CLI."
+                                : "Not configured. Install the GitHub CLI and run gh auth login.";
+                            color: root.github-configured ? #72c69a : #d99a62;
+                            font-size: 10px;
+                            overflow: elide;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                    }
+                    if root.git-installed: Rectangle {
+                        height: 43px;
+                        Text {
+                            x: 0px; y: 0px; height: 18px;
+                            text: "Private repositories by default";
+                            color: #c9cad0;
+                            font-size: 11px;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                        Text {
+                            x: 0px; y: 20px; width: parent.width - 55px; height: 18px;
+                            text: "Choose visibility when publishing new GitHub repositories.";
+                            color: #858790;
+                            font-size: 10px;
+                            overflow: elide;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                        ToggleSwitch {
+                            x: parent.width - self.width;
+                            y: 4px;
+                            checked: root.github-private-repositories;
+                            label: "Private repositories by default";
+                            toggled(value) => {
+                                root.github-private-repositories = value;
+                                root.set-github-private-repositories(value);
+                            }
+                        }
+                    }
+                    if root.git-installed: HorizontalLayout {
+                        height: 30px;
+                        SmallButton {
+                            width: 112px;
+                            text: "Refresh status";
+                            clicked => { root.refresh-source-control(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
                     }
                     Rectangle { height: 1px; background: #2b2d33; }
                     SectionTitle { text: "FILES INSPECTOR"; color: #a995ff; }

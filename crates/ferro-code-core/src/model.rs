@@ -432,6 +432,8 @@ pub struct Preferences {
     pub summary_effort: String,
     #[serde(default = "default_visible_thread_limit")]
     pub visible_thread_limit: u32,
+    #[serde(default = "default_true")]
+    pub github_private_repositories: bool,
 }
 
 fn default_summary_model() -> String {
@@ -463,6 +465,7 @@ impl Default for Preferences {
             summary_model: default_summary_model(),
             summary_effort: default_summary_effort(),
             visible_thread_limit: default_visible_thread_limit(),
+            github_private_repositories: true,
         }
     }
 }
@@ -494,10 +497,15 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("visible_thread_limit");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("github_private_repositories");
 
         let preferences: Preferences = serde_json::from_value(value).unwrap();
         assert!(preferences.respect_gitignore);
         assert_eq!(preferences.visible_thread_limit, 5);
+        assert!(preferences.github_private_repositories);
     }
 
     #[test]

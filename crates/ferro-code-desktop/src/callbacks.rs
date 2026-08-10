@@ -451,6 +451,16 @@ pub(super) fn wire_callbacks(
         }
     });
 
+    let weak = ui.as_weak();
+    let controller_ref = controller.clone();
+    let search_ref = search.clone();
+    ui.on_git_action(move || {
+        controller_ref.borrow_mut().run_git_action();
+        if let Some(ui) = weak.upgrade() {
+            sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
+        }
+    });
+
     callback_with_string(
         ui,
         controller,
@@ -923,6 +933,21 @@ pub(super) fn wire_callbacks(
             controller.state.prefs.respect_gitignore = respect;
             controller.state.touch();
             controller.restart_workspace_inspection();
+        }
+        drop(controller);
+        if let Some(ui) = weak.upgrade() {
+            sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
+        }
+    });
+
+    let weak = ui.as_weak();
+    let controller_ref = controller.clone();
+    let search_ref = search.clone();
+    ui.on_set_github_private_repositories(move |private| {
+        let mut controller = controller_ref.borrow_mut();
+        if controller.state.prefs.github_private_repositories != private {
+            controller.state.prefs.github_private_repositories = private;
+            controller.state.touch();
         }
         drop(controller);
         if let Some(ui) = weak.upgrade() {

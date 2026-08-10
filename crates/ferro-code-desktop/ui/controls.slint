@@ -1,6 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { AttachmentRow, ChangeRow, FileRow, OpenMethodRow } from "types.slint";
-import { ComposerChevron, PaperclipMark } from "icons.slint";
+import { ComposerChevron, GitMark, PaperclipMark } from "icons.slint";
 
 export component ContextIndicator inherits Rectangle {
     in property <string> label;
@@ -450,6 +450,42 @@ export component OpenProjectButton inherits Rectangle {
                 }
             }
         }
+    }
+}
+
+export component GitActionButton inherits Rectangle {
+    in property <string> text: "Git";
+    in property <bool> enabled: true;
+    in property <bool> busy: false;
+    callback clicked;
+
+    width: 104px;
+    height: 30px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: root.enabled ? #3a3c43 : #2a2b30;
+    background: !root.enabled ? #15161a : git-touch.pressed ? #202126 : git-touch.has-hover ? #292a30 : #191a1e;
+    accessible-role: button;
+    accessible-label: root.busy ? "Git action in progress" : root.text;
+    accessible-enabled: root.enabled;
+
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        spacing: 7px;
+        GitMark { y: (parent.height - self.height) / 2; }
+        Text {
+            text: root.busy ? "Working..." : root.text;
+            color: root.enabled ? #d9dae0 : #696b72;
+            font-size: 11px;
+            vertical-alignment: TextVerticalAlignment.center;
+            overflow: elide;
+        }
+    }
+    git-touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
     }
 }
 

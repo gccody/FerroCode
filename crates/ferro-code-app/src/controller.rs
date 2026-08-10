@@ -49,7 +49,7 @@ struct PendingTurn {
 #[derive(Debug, Clone)]
 struct SummaryJob {
     key: String,
-    local_thread_id: String,
+    target: SummaryTarget,
     prompt: String,
     cwd: String,
     model: String,
@@ -59,8 +59,14 @@ struct SummaryJob {
 #[derive(Debug, Clone)]
 struct ActiveSummary {
     key: String,
-    local_thread_id: String,
+    target: SummaryTarget,
     output: String,
+}
+
+#[derive(Debug, Clone)]
+enum SummaryTarget {
+    ThreadTitle { local_thread_id: String },
+    GitCommit { root: String },
 }
 
 pub struct Controller {
@@ -68,7 +74,10 @@ pub struct Controller {
     backend: Option<CodexBackend>,
     backend_start: Option<Receiver<Result<CodexBackend, String>>>,
     startup_in_progress: bool,
-    workspace_rx: Option<Receiver<(String, Vec<String>)>>,
+    workspace_rx: Option<Receiver<(Option<String>, workspace::WorkspaceSnapshot)>>,
+    workspace_snapshots: HashMap<String, workspace::WorkspaceSnapshot>,
+    github_configuration: Option<bool>,
+    git_action_rx: Option<Receiver<Result<String, String>>>,
     update_check_rx: Option<Receiver<Result<Option<String>, String>>>,
     update_install_rx: Option<Receiver<Result<(), String>>>,
     pending: HashMap<u64, PendingCall>,
@@ -85,6 +94,9 @@ impl Controller {
             backend_start: None,
             startup_in_progress: false,
             workspace_rx: None,
+            workspace_snapshots: HashMap::new(),
+            github_configuration: None,
+            git_action_rx: None,
             update_check_rx: None,
             update_install_rx: None,
             pending: HashMap::new(),
@@ -139,11 +151,39 @@ impl Controller {
         for message in messages {
             self.handle_message(message);
         }
-        if let Some((diff, files)) = self.workspace_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        if let Some((root, snapshot)) = self.workspace_rx.as_ref().and_then(|rx| rx.try_recv().ok())
+        {
             self.workspace_rx = None;
-            self.state.git_diff = diff;
-            self.state.files = files;
-            self.state.touch();
+            self.github_configuration = Some(snapshot.git.github_configured);
+            if let Some(root) = &root {
+                self.workspace_snapshots
+                    .insert(workspace_cache_key(root), snapshot.clone());
+            }
+            let active_root = self.state.active_project_path();
+            let result_is_active = match (root.as_deref(), active_root) {
+                (Some(result), Some(active)) => result.eq_ignore_ascii_case(active),
+                (None, None) => true,
+                _ => false,
+            };
+            if result_is_active {
+                self.apply_workspace_snapshot(snapshot);
+            }
+        }
+        if let Some(result) = self
+            .git_action_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok())
+        {
+            self.git_action_rx = None;
+            self.state.git_action_in_progress = false;
+            match result {
+                Ok(message) => {
+                    self.state.activity_log.push(message.clone());
+                    self.state.info(message);
+                }
+                Err(error) => self.state.error(error),
+            }
+            self.invalidate_current_workspace_snapshot();
         }
         if let Some(result) = self
             .update_check_rx
@@ -261,12 +301,16 @@ impl Controller {
     pub fn add_project(&mut self, path: String) {
         self.state.add_project(path, unix_timestamp());
         self.state.new_thread(unix_timestamp());
-        self.refresh_workspace();
+        self.switch_workspace_inspection();
     }
 
     pub fn select_project(&mut self, id: &str) {
+        let previous_root = self.state.active_project_path().map(str::to_owned);
         if self.state.select_project(id) {
-            self.refresh_workspace();
+            let current_root = self.state.active_project_path().map(str::to_owned);
+            if !same_workspace(previous_root.as_deref(), current_root.as_deref()) {
+                self.switch_workspace_inspection();
+            }
         }
     }
 
@@ -278,8 +322,12 @@ impl Controller {
     }
 
     pub fn open_thread(&mut self, id: &str) {
+        let previous_root = self.state.active_project_path().map(str::to_owned);
         if self.state.open_thread(id) {
-            self.refresh_workspace();
+            let current_root = self.state.active_project_path().map(str::to_owned);
+            if !same_workspace(previous_root.as_deref(), current_root.as_deref()) {
+                self.switch_workspace_inspection();
+            }
         }
     }
 
@@ -526,28 +574,143 @@ impl Controller {
     }
 
     pub fn refresh_workspace(&mut self) {
-        let Some(root) = self.state.active_project_path().map(str::to_owned) else {
-            self.state.git_diff.clear();
-            self.state.files.clear();
-            self.workspace_rx = None;
-            return;
-        };
+        let root = self.state.active_project_path().map(str::to_owned);
         if self.workspace_rx.is_some() {
             return;
         }
         let respect_gitignore = self.state.prefs.respect_gitignore;
+        let github_configuration = self.github_configuration;
         let (tx, rx) = unbounded();
         self.workspace_rx = Some(rx);
-        let _ = thread::Builder::new()
+        let result_root = root.clone();
+        if let Err(error) = thread::Builder::new()
             .name("workspace-inspector".into())
             .spawn(move || {
-                let _ = tx.send(workspace::inspect(&root, respect_gitignore));
-            });
+                let snapshot =
+                    workspace::inspect(root.as_deref(), respect_gitignore, github_configuration);
+                let _ = tx.send((result_root, snapshot));
+            })
+        {
+            self.workspace_rx = None;
+            self.state.workspace_loading = false;
+            self.state
+                .error(format!("Could not inspect the workspace: {error}"));
+        }
     }
 
     pub fn restart_workspace_inspection(&mut self) {
         self.workspace_rx = None;
+        self.github_configuration = None;
         self.refresh_workspace();
+    }
+
+    fn switch_workspace_inspection(&mut self) {
+        self.workspace_rx = None;
+        self.restore_cached_workspace();
+        self.refresh_workspace();
+    }
+
+    fn invalidate_current_workspace_snapshot(&mut self) {
+        if let Some(root) = self.state.active_project_path() {
+            self.workspace_snapshots.remove(&workspace_cache_key(root));
+        }
+        self.switch_workspace_inspection();
+    }
+
+    fn restore_cached_workspace(&mut self) {
+        let root = self.state.active_project_path().map(str::to_owned);
+        let snapshot = root
+            .as_deref()
+            .and_then(|root| self.workspace_snapshots.get(&workspace_cache_key(root)))
+            .cloned();
+        if let Some(snapshot) = snapshot {
+            self.apply_workspace_snapshot(snapshot);
+            return;
+        }
+
+        let installed = self.state.git_status.installed;
+        let github_configured = self
+            .github_configuration
+            .unwrap_or(self.state.git_status.github_configured);
+        self.state.git_diff.clear();
+        self.state.files.clear();
+        self.state.git_status = workspace::GitStatus {
+            installed,
+            github_configured,
+            ..workspace::GitStatus::default()
+        };
+        self.state.workspace_loading = root.is_some();
+        self.state.touch();
+    }
+
+    fn apply_workspace_snapshot(&mut self, snapshot: workspace::WorkspaceSnapshot) {
+        self.state.git_diff = snapshot.diff;
+        self.state.files = snapshot.files;
+        self.state.git_status = snapshot.git;
+        self.state.workspace_loading = false;
+        self.state.touch();
+    }
+
+    pub fn run_git_action(&mut self) {
+        if self.state.git_action_in_progress {
+            return;
+        }
+        let Some(root) = self.state.active_project_path().map(str::to_owned) else {
+            self.state.error("Select a project before using Git");
+            return;
+        };
+        let git = &self.state.git_status;
+        if !git.installed {
+            return;
+        }
+        if !git.is_repository {
+            self.spawn_git_action(root, workspace::GitAction::Initialize);
+        } else if git.has_changes {
+            if !self.state.connected {
+                self.state
+                    .error("Codex must be connected to create the commit summary");
+                return;
+            }
+            match workspace::commit_context(&root) {
+                Ok(context) => self.start_commit_summary(root, &context),
+                Err(error) => self.state.error(error),
+            }
+        } else if !git.has_github_remote {
+            if !git.github_configured {
+                self.state
+                    .error("GitHub is not configured. Run `gh auth login` and try again.");
+                return;
+            }
+            self.spawn_git_action(root, workspace::GitAction::Publish);
+        } else if git.has_unpushed_commits {
+            if !git.github_configured {
+                self.state
+                    .error("GitHub is not configured. Run `gh auth login` and try again.");
+                return;
+            }
+            self.spawn_git_action(root, workspace::GitAction::Push);
+        } else {
+            self.state.info("Repository is up to date");
+        }
+    }
+
+    fn spawn_git_action(&mut self, root: String, action: workspace::GitAction) {
+        self.state.git_action_in_progress = true;
+        self.state.touch();
+        let private_repository = self.state.prefs.github_private_repositories;
+        let (tx, rx) = unbounded();
+        self.git_action_rx = Some(rx);
+        if let Err(error) = thread::Builder::new()
+            .name("git-action".into())
+            .spawn(move || {
+                let _ = tx.send(workspace::run_action(&root, action, private_repository));
+            })
+        {
+            self.git_action_rx = None;
+            self.state.git_action_in_progress = false;
+            self.state
+                .error(format!("Could not start the Git action: {error}"));
+        }
     }
 
     fn attach_backend(&mut self, result: Result<CodexBackend, String>) {
@@ -621,19 +784,29 @@ impl Controller {
                     }
                     Some(PendingCall::SummaryThreadStart(job)) => {
                         self.summary_pending.remove(&job.key);
-                        self.state
-                            .activity_log
-                            .push(format!("Title summary unavailable: {text}"));
-                        report_error = false;
+                        if matches!(job.target, SummaryTarget::GitCommit { .. }) {
+                            self.state.git_action_in_progress = false;
+                        } else {
+                            self.state
+                                .activity_log
+                                .push(format!("Title summary unavailable: {text}"));
+                            report_error = false;
+                        }
                     }
                     Some(PendingCall::SummaryTurnStart { thread_id }) => {
                         if let Some(active) = self.active_summaries.remove(thread_id) {
                             self.summary_pending.remove(&active.key);
+                            if matches!(active.target, SummaryTarget::GitCommit { .. }) {
+                                self.state.git_action_in_progress = false;
+                            } else {
+                                self.state
+                                    .activity_log
+                                    .push(format!("Title summary unavailable: {text}"));
+                                report_error = false;
+                            }
+                        } else {
+                            report_error = false;
                         }
-                        self.state
-                            .activity_log
-                            .push(format!("Title summary unavailable: {text}"));
-                        report_error = false;
                     }
                     _ => {}
                 }
@@ -760,7 +933,7 @@ impl Controller {
                         thread_id.clone(),
                         ActiveSummary {
                             key: job.key,
-                            local_thread_id: job.local_thread_id,
+                            target: job.target,
                             output: String::new(),
                         },
                     );
@@ -779,9 +952,15 @@ impl Controller {
                     );
                 } else {
                     self.summary_pending.remove(&job.key);
-                    self.state
-                        .activity_log
-                        .push("Title summary did not return a thread id".into());
+                    if matches!(job.target, SummaryTarget::GitCommit { .. }) {
+                        self.state.git_action_in_progress = false;
+                        self.state
+                            .error("Could not start the AI commit-message summary");
+                    } else {
+                        self.state
+                            .activity_log
+                            .push("Title summary did not return a thread id".into());
+                    }
                 }
             }
             PendingCall::SummaryTurnStart { .. } => {}
@@ -810,12 +989,45 @@ impl Controller {
             }),
             PendingCall::SummaryThreadStart(SummaryJob {
                 key,
-                local_thread_id: local_thread_id.to_owned(),
+                target: SummaryTarget::ThreadTitle {
+                    local_thread_id: local_thread_id.to_owned(),
+                },
                 prompt: format!(
                     "Create a concise 3-7 word sidebar title for this request. Do not call tools. Return only the title, with no quotes, punctuation, or explanation.\n\nRequest:\n{}",
                     truncate_text(request, 2_000)
                 ),
                 cwd: self.state.prefs.workspace.clone(),
+                model: self.state.prefs.summary_model.clone(),
+                effort: self.state.prefs.summary_effort.clone(),
+            }),
+        );
+    }
+
+    fn start_commit_summary(&mut self, root: String, context: &str) {
+        let key = format!("git-commit:{root}");
+        if !self.summary_pending.insert(key.clone()) {
+            return;
+        }
+        self.state.git_action_in_progress = true;
+        self.state.touch();
+        self.request(
+            "thread/start",
+            json!({
+                "cwd": root,
+                "ephemeral": true,
+                "approvalPolicy": "never",
+                "sandbox": "read-only",
+                "serviceName": "ferro-code-summary",
+                "model": self.state.prefs.summary_model
+            }),
+            PendingCall::SummaryThreadStart(SummaryJob {
+                key,
+                target: SummaryTarget::GitCommit { root: root.clone() },
+                prompt: format!(
+                    "Write a concise Git commit subject for these changes. Use imperative mood, stay under 72 characters, and return only the subject with no quotes or explanation. Do not call tools.\n\n{}",
+                    truncate_text(context, 24_000)
+                ),
+                cwd: root,
                 model: self.state.prefs.summary_model.clone(),
                 effort: self.state.prefs.summary_effort.clone(),
             }),
@@ -955,6 +1167,15 @@ impl Controller {
                 self.state.connected = false;
                 self.state.connection_text = "Codex disconnected".into();
                 self.state.running_turns.clear();
+                if self
+                    .active_summaries
+                    .values()
+                    .any(|summary| matches!(summary.target, SummaryTarget::GitCommit { .. }))
+                {
+                    self.state.git_action_in_progress = false;
+                }
+                self.summary_pending.clear();
+                self.active_summaries.clear();
                 self.state.error(
                     params
                         .get("message")
@@ -1091,22 +1312,64 @@ impl Controller {
                     .remove(thread_id)
                     .expect("checked above");
                 self.summary_pending.remove(&active.key);
-                let title = clean_summary(&active.output, 70);
-                if !title.is_empty()
-                    && let Some(thread) = self
-                        .state
-                        .threads
-                        .iter_mut()
-                        .find(|thread| thread.id == active.local_thread_id)
-                {
-                    thread.title = title;
-                    thread.title_generated = true;
+                match active.target {
+                    SummaryTarget::ThreadTitle { local_thread_id } => {
+                        let title = clean_summary(&active.output, 70);
+                        if !title.is_empty()
+                            && let Some(thread) = self
+                                .state
+                                .threads
+                                .iter_mut()
+                                .find(|thread| thread.id == local_thread_id)
+                        {
+                            thread.title = title;
+                            thread.title_generated = true;
+                        }
+                    }
+                    SummaryTarget::GitCommit { root } => {
+                        let status = params
+                            .pointer("/turn/status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("completed");
+                        let message = clean_summary(&active.output, 72);
+                        if status == "failed" {
+                            self.state.git_action_in_progress = false;
+                            self.state.error(
+                                params
+                                    .pointer("/turn/error/message")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("The commit-message summary failed"),
+                            );
+                        } else if message.is_empty() {
+                            self.state.git_action_in_progress = false;
+                            self.state
+                                .error("The summary model did not return a commit message");
+                        } else {
+                            self.spawn_git_commit(root, message);
+                        }
+                    }
                 }
                 self.state.touch();
             }
             _ => {}
         }
         true
+    }
+
+    fn spawn_git_commit(&mut self, root: String, message: String) {
+        let (tx, rx) = unbounded();
+        self.git_action_rx = Some(rx);
+        if let Err(error) = thread::Builder::new()
+            .name("git-commit".into())
+            .spawn(move || {
+                let _ = tx.send(workspace::commit(&root, &message));
+            })
+        {
+            self.git_action_rx = None;
+            self.state.git_action_in_progress = false;
+            self.state
+                .error(format!("Could not start the Git commit: {error}"));
+        }
     }
 
     fn local_thread_id(&self, params: &Value) -> Option<String> {
@@ -1375,6 +1638,34 @@ fn unix_timestamp() -> i64 {
         .as_secs() as i64
 }
 
+fn same_workspace(left: Option<&str>, right: Option<&str>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            #[cfg(windows)]
+            {
+                left.eq_ignore_ascii_case(right)
+            }
+            #[cfg(not(windows))]
+            {
+                left == right
+            }
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn workspace_cache_key(root: &str) -> String {
+    #[cfg(windows)]
+    {
+        root.replace('/', "\\").to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        root.to_owned()
+    }
+}
+
 fn unix_timestamp_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1473,6 +1764,50 @@ mod tests {
             controller.state.active_local_thread.as_deref(),
             Some(controller.state.threads[0].id.as_str())
         );
+    }
+
+    #[test]
+    fn project_switch_restores_cached_workspace_without_waiting_for_refresh() {
+        let mut controller = Controller::new(PersistedState::default());
+        let first_project = controller.state.add_project("first".into(), 1);
+        let first_thread = controller.state.new_thread(2).unwrap();
+        controller.state.add_project("second".into(), 3);
+        controller.state.new_thread(4).unwrap();
+        controller.github_configuration = Some(false);
+        controller.workspace_snapshots.insert(
+            workspace_cache_key("first"),
+            workspace::WorkspaceSnapshot {
+                diff: " M cached.txt".into(),
+                files: vec!["cached.txt".into()],
+                git: workspace::GitStatus {
+                    installed: true,
+                    is_repository: true,
+                    has_changes: true,
+                    ..workspace::GitStatus::default()
+                },
+            },
+        );
+
+        controller.open_thread(&first_thread);
+
+        assert_eq!(
+            controller.state.active_project.as_deref(),
+            Some(first_project.as_str())
+        );
+        assert_eq!(controller.state.files, ["cached.txt"]);
+        assert_eq!(controller.state.git_diff, " M cached.txt");
+        assert!(!controller.state.workspace_loading);
+
+        // Opening another thread in this project should not start another scan.
+        controller.workspace_rx = None;
+        let other_thread = controller.state.new_thread(5).unwrap();
+        controller.open_thread(&first_thread);
+        assert_eq!(
+            controller.state.active_local_thread.as_deref(),
+            Some(first_thread.as_str())
+        );
+        assert_ne!(other_thread, first_thread);
+        assert!(controller.workspace_rx.is_none());
     }
 
     #[test]
