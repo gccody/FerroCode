@@ -5,6 +5,8 @@ use ferro_code_core::{
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 
+use crate::workspace::GitStatus;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Question {
     pub id: String,
@@ -55,6 +57,9 @@ pub struct AppState {
     pub codex_update_in_progress: bool,
     pub activity_log: Vec<String>,
     pub git_diff: String,
+    pub git_status: GitStatus,
+    pub git_action_in_progress: bool,
+    pub workspace_loading: bool,
     pub files: Vec<String>,
     pub revision: u64,
 }
@@ -88,6 +93,9 @@ impl AppState {
             codex_update_in_progress: false,
             activity_log: vec!["Ferro Code launched".into()],
             git_diff: String::new(),
+            git_status: GitStatus::default(),
+            git_action_in_progress: false,
+            workspace_loading: false,
             files: Vec::new(),
             revision: 1,
         };

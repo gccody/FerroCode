@@ -129,6 +129,14 @@ export component InspectorMark inherits Path {
     stroke-line-cap: round; stroke-line-join: round;
 }
 
+export component GitMark inherits Path {
+    width: 16px; height: 16px;
+    commands: "M 4 2 A 2 2 0 1 1 4 6 A 2 2 0 1 1 4 2 M 4 6 V 10 A 2 2 0 0 0 6 12 H 10 M 10 10 A 2 2 0 1 1 10 14 A 2 2 0 1 1 10 10 M 10 2 A 2 2 0 1 1 10 6 A 2 2 0 1 1 10 2 M 10 6 V 10";
+    viewbox-width: 14; viewbox-height: 16;
+    fill: transparent; stroke: #aaa4c4; stroke-width: 1.5px;
+    stroke-line-cap: round; stroke-line-join: round;
+}
+
 export component RefreshMark inherits Path {
     width: 14px; height: 14px;
     commands: "M 11.5 4.5 A 5 5 0 1 0 11.4 10 M 11.5 1.5 L 11.5 4.5 L 8.5 4.5";

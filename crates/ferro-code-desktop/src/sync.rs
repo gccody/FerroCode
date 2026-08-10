@@ -19,6 +19,29 @@ pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     ui.set_plan_label(state.account.plan.clone().into());
     ui.set_workspace_path(short_path(&state.prefs.workspace, 54).into());
     ui.set_respect_gitignore(state.prefs.respect_gitignore);
+    ui.set_git_installed(state.git_status.installed);
+    ui.set_github_configured(state.git_status.github_configured);
+    ui.set_github_private_repositories(state.prefs.github_private_repositories);
+    ui.set_git_action_busy(state.git_action_in_progress);
+    let (git_label, git_enabled) = if state.active_project.is_none() {
+        ("Git", false)
+    } else if state.git_action_in_progress {
+        ("Working...", false)
+    } else if state.workspace_loading {
+        ("Loading...", false)
+    } else if !state.git_status.is_repository {
+        ("Initialize", true)
+    } else if state.git_status.has_changes {
+        ("Commit", state.connected)
+    } else if !state.git_status.has_github_remote {
+        ("Publish", state.git_status.github_configured)
+    } else if state.git_status.has_unpushed_commits {
+        ("Push", state.git_status.github_configured)
+    } else {
+        ("Up to date", false)
+    };
+    ui.set_git_action_label(git_label.into());
+    ui.set_git_action_enabled(git_enabled);
     ui.set_visible_thread_limit(state.prefs.visible_thread_limit.clamp(1, 100) as i32);
     ui.set_workspace_name(
         state
