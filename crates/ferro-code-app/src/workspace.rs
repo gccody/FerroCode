@@ -161,15 +161,13 @@ pub(crate) fn run_action(
             Ok("Initialized Git repository".into())
         }
         GitAction::Publish => {
-            if !command_success("gh", &["auth", "status", "--hostname", "github.com"]) {
-                return Err("GitHub is not configured. Run `gh auth login` and try again.".into());
-            }
+            ensure_github_configured()?;
             let repo_name = Path::new(root)
                 .file_name()
                 .and_then(|name| name.to_str())
                 .filter(|name| !name.is_empty())
                 .ok_or("The project folder does not have a valid repository name")?;
-            let mut args = vec![
+            let args = vec![
                 "repo",
                 "create",
                 repo_name,
@@ -183,23 +181,78 @@ pub(crate) fn run_action(
                     "--public"
                 },
             ];
-            if command_success("git", &["-C", root, "rev-parse", "--verify", "HEAD"]) {
-                args.push("--push");
-            }
             run_command("gh", &args)?;
+            if command_success("git", &["-C", root, "rev-parse", "--verify", "HEAD"])
+                && let Err(error) = push_to_github(root)
+            {
+                return Err(format!(
+                    "The GitHub repository was created, but the initial push failed: {error}"
+                ));
+            }
             Ok(format!("Published {repo_name} to GitHub"))
         }
         GitAction::Push => {
-            if !command_success("gh", &["auth", "status", "--hostname", "github.com"]) {
-                return Err("GitHub is not configured. Run `gh auth login` and try again.".into());
-            }
-            run_command(
-                "git",
-                &["-C", root, "push", "--set-upstream", "origin", "HEAD"],
-            )?;
+            ensure_github_configured()?;
+            push_to_github(root)?;
             Ok("Pushed changes to GitHub".into())
         }
     }
+}
+
+fn ensure_github_configured() -> Result<(), String> {
+    if command_success("gh", &["auth", "status", "--hostname", "github.com"]) {
+        Ok(())
+    } else {
+        Err("GitHub is not configured. Run `gh auth login` and try again.".into())
+    }
+}
+
+fn push_to_github(root: &str) -> Result<(), String> {
+    configure_github_https_remote(root)?;
+    run_command(
+        "git",
+        &[
+            "-C",
+            root,
+            "-c",
+            "credential.https://github.com.helper=",
+            "-c",
+            "credential.https://github.com.helper=!gh auth git-credential",
+            "push",
+            "--set-upstream",
+            "origin",
+            "HEAD",
+        ],
+    )?;
+    Ok(())
+}
+
+fn configure_github_https_remote(root: &str) -> Result<String, String> {
+    let origin = run_command("git", &["-C", root, "remote", "get-url", "origin"])?;
+    let https = github_https_remote(&origin)
+        .ok_or("The origin remote is not a supported GitHub repository URL")?;
+    if origin != https {
+        run_command("git", &["-C", root, "remote", "set-url", "origin", &https])?;
+    }
+    Ok(https)
+}
+
+fn github_https_remote(remote: &str) -> Option<String> {
+    let remote = remote.trim();
+    let path = remote
+        .strip_prefix("git@github.com:")
+        .or_else(|| remote.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| remote.strip_prefix("ssh://github.com/"))
+        .or_else(|| remote.strip_prefix("https://github.com/"))
+        .or_else(|| remote.strip_prefix("http://github.com/"))?
+        .trim_start_matches('/');
+    let mut segments = path.trim_end_matches('/').split('/');
+    let owner = segments.next().filter(|segment| !segment.is_empty())?;
+    let repository = segments.next().filter(|segment| !segment.is_empty())?;
+    if segments.next().is_some() {
+        return None;
+    }
+    Some(format!("https://github.com/{owner}/{repository}"))
 }
 
 fn command_success(program: &str, args: &[&str]) -> bool {
@@ -382,6 +435,43 @@ mod tests {
         assert!(committed.has_commits);
         assert!(!committed.has_changes);
 
+        run_command(
+            "git",
+            &[
+                "-C",
+                root_text,
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:ferro-code/example.git",
+            ],
+        )
+        .unwrap();
+        let https = configure_github_https_remote(root_text).unwrap();
+        assert_eq!(https, "https://github.com/ferro-code/example.git");
+        assert_eq!(
+            command_stdout("git", &["-C", root_text, "remote", "get-url", "origin"]).as_deref(),
+            Some("https://github.com/ferro-code/example.git")
+        );
+
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn github_remote_urls_are_normalized_to_https() {
+        for remote in [
+            "git@github.com:owner/repo.git",
+            "ssh://git@github.com/owner/repo.git",
+            "ssh://github.com/owner/repo.git",
+            "http://github.com/owner/repo.git",
+            "https://github.com/owner/repo.git",
+        ] {
+            assert_eq!(
+                github_https_remote(remote).as_deref(),
+                Some("https://github.com/owner/repo.git")
+            );
+        }
+        assert_eq!(github_https_remote("git@example.com:owner/repo.git"), None);
+        assert_eq!(github_https_remote("https://github.com/owner"), None);
     }
 }

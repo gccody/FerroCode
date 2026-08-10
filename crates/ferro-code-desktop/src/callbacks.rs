@@ -405,6 +405,7 @@ pub(super) fn wire_callbacks(
 
     let weak = ui.as_weak();
     let controller_ref = controller.clone();
+    let search_ref = search.clone();
     let open_methods_ref = open_methods.clone();
     ui.on_open_project(move |label| {
         let project_path = controller_ref
@@ -431,23 +432,15 @@ pub(super) fn wire_callbacks(
                     .and_then(|method| method.open(std::path::Path::new(&path)))
             });
 
-        if let Some(ui) = weak.upgrade() {
+        {
+            let mut controller = controller_ref.borrow_mut();
             match result {
-                Ok(()) => {
-                    ui.set_toast_text(format!("Opened project in {label}").into());
-                    ui.set_toast_error(false);
-                }
-                Err(error) => {
-                    ui.set_toast_text(error.into());
-                    ui.set_toast_error(true);
-                }
+                Ok(()) => controller.state.info(format!("Opened project in {label}")),
+                Err(error) => controller.state.error(error),
             }
-            let clear_weak = weak.clone();
-            Timer::single_shot(Duration::from_secs(2), move || {
-                if let Some(ui) = clear_weak.upgrade() {
-                    ui.set_toast_text("".into());
-                }
-            });
+        }
+        if let Some(ui) = weak.upgrade() {
+            sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
         }
     });
 
@@ -456,6 +449,19 @@ pub(super) fn wire_callbacks(
     let search_ref = search.clone();
     ui.on_git_action(move || {
         controller_ref.borrow_mut().run_git_action();
+        if let Some(ui) = weak.upgrade() {
+            sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
+        }
+    });
+
+    let weak = ui.as_weak();
+    let controller_ref = controller.clone();
+    let search_ref = search.clone();
+    ui.on_dismiss_toast(move |revision| {
+        controller_ref
+            .borrow_mut()
+            .state
+            .dismiss_toast(revision as u32);
         if let Some(ui) = weak.upgrade() {
             sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
         }
@@ -639,53 +645,43 @@ pub(super) fn wire_callbacks(
     });
 
     let weak = ui.as_weak();
+    let controller_ref = controller.clone();
+    let search_ref = search.clone();
     ui.on_copy_code(move |text| {
         let result = arboard::Clipboard::new()
             .and_then(|mut clipboard| clipboard.set_text(text.to_string()));
-        if let Some(ui) = weak.upgrade() {
+        {
+            let mut controller = controller_ref.borrow_mut();
             match result {
-                Ok(()) => {
-                    ui.set_toast_text("Code copied to clipboard".into());
-                    ui.set_toast_error(false);
-                }
-                Err(error) => {
-                    ui.set_toast_text(format!("Could not copy code: {error}").into());
-                    ui.set_toast_error(true);
-                }
+                Ok(()) => controller.state.info("Code copied to clipboard"),
+                Err(error) => controller
+                    .state
+                    .error(format!("Could not copy code: {error}")),
             }
         }
-
-        let clear_weak = weak.clone();
-        Timer::single_shot(Duration::from_secs(2), move || {
-            if let Some(ui) = clear_weak.upgrade() {
-                ui.set_toast_text("".into());
-            }
-        });
+        if let Some(ui) = weak.upgrade() {
+            sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
+        }
     });
 
     let weak = ui.as_weak();
+    let controller_ref = controller.clone();
+    let search_ref = search.clone();
     ui.on_copy_response(move |text| {
         let result = arboard::Clipboard::new()
             .and_then(|mut clipboard| clipboard.set_text(text.to_string()));
-        if let Some(ui) = weak.upgrade() {
+        {
+            let mut controller = controller_ref.borrow_mut();
             match result {
-                Ok(()) => {
-                    ui.set_toast_text("Response copied to clipboard".into());
-                    ui.set_toast_error(false);
-                }
-                Err(error) => {
-                    ui.set_toast_text(format!("Could not copy response: {error}").into());
-                    ui.set_toast_error(true);
-                }
+                Ok(()) => controller.state.info("Response copied to clipboard"),
+                Err(error) => controller
+                    .state
+                    .error(format!("Could not copy response: {error}")),
             }
         }
-
-        let clear_weak = weak.clone();
-        Timer::single_shot(Duration::from_secs(2), move || {
-            if let Some(ui) = clear_weak.upgrade() {
-                ui.set_toast_text("".into());
-            }
-        });
+        if let Some(ui) = weak.upgrade() {
+            sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
+        }
     });
 
     let weak = ui.as_weak();
