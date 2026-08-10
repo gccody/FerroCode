@@ -50,15 +50,38 @@ fn select_windows_backend() -> Result<(), slint::PlatformError> {
         .select()
 }
 
+#[cfg(target_os = "macos")]
+fn select_macos_backend() -> Result<(), slint::PlatformError> {
+    use slint::winit_030::winit::platform::macos::WindowAttributesExtMacOS;
+
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .with_winit_window_attributes_hook(|attributes| {
+            // Keep the AppKit frame so macOS supplies its rounded corners,
+            // shadow, and traffic-light controls, while letting Ferro Code's
+            // header fill the title-bar area.
+            attributes
+                .with_decorations(true)
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true)
+                .with_fullsize_content_view(true)
+                .with_has_shadow(true)
+        })
+        .select()
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     #[cfg(windows)]
     select_windows_backend()?;
+    #[cfg(target_os = "macos")]
+    select_macos_backend()?;
 
     let store = LocalStore::discover();
     let persisted = store.load().unwrap_or_default();
     let controller = Rc::new(RefCell::new(Controller::new(persisted)));
     controller.borrow_mut().start();
     let ui = MainWindow::new()?;
+    ui.set_native_macos_window(cfg!(target_os = "macos"));
     let open_methods = Rc::new(available_open_methods());
     ui.set_open_project_methods(model(open_methods.iter().map(|method| {
         let icon = method.icon();
