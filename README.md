@@ -1,6 +1,6 @@
 # Ferro Code
 
-Ferro Code is a lightweight native desktop control surface for the locally installed `codex app-server`. It runs on Windows, macOS, and Linux, reuses the Codex CLI's existing ChatGPT subscription or API authentication, and stores projects and conversation history locally.
+Ferro Code is a lightweight native desktop control surface for Codex. It runs on Windows, macOS, and Linux, embeds Codex's Rust app-server SDK, reuses existing ChatGPT subscription or API authentication, and stores projects and conversation history locally.
 
 The desktop UI is implemented in [Slint](https://slint.dev/) with its software renderer. There is no Electron shell, browser UI, webview, JavaScript frontend, or hosted middleman.
 
@@ -22,8 +22,8 @@ The desktop UI is implemented in [Slint](https://slint.dev/) with its software r
 ## Requirements
 
 - Windows 10 or later, macOS, or a Linux desktop with X11 or Wayland and an XDG desktop portal
-- Rust 1.92 or later
-- Codex CLI installed and available as `codex` on `PATH`
+- Rust 1.95 or later
+- Codex CLI installed and available as `codex` on `PATH` for compatibility fallback; it is not invoked when the embedded SDK starts successfully
 - An existing Codex login (`codex login`) or another supported Codex authentication method
 
 ## Run
@@ -58,7 +58,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-The ignored protocol check exercises the configured local Codex installation:
+The ignored protocol check exercises the configured native Codex backend:
 
 ```shell
 cargo test -p ferro-code-protocol real_codex_app_server_handshake -- --ignored
@@ -77,7 +77,7 @@ cargo test -p ferro-code-protocol
 | Crate | Responsibility | UI dependency |
 |---|---|---|
 | `ferro-code-core` | Domain models, formatting, preferences, and staged persistence | None |
-| `ferro-code-protocol` | Hidden Codex child process and JSONL transport | None |
+| `ferro-code-protocol` | Embedded Codex Rust SDK with CLI JSONL fallback | None |
 | `ferro-code-app` | Testable application state machine and workspace inspection | None |
 | `ferro-code` | Slint components, native dialogs, and state-to-view projection | Slint |
 

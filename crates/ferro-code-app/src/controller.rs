@@ -126,7 +126,6 @@ impl Controller {
             });
         self.state.touch();
         self.refresh_workspace();
-        self.check_for_codex_update();
     }
 
     pub fn poll(&mut self) -> bool {
@@ -713,7 +712,11 @@ impl Controller {
     fn attach_backend(&mut self, result: Result<CodexBackend, String>) {
         match result {
             Ok(backend) => {
+                let uses_cli_fallback = backend.uses_cli_fallback();
                 self.backend = Some(backend);
+                if uses_cli_fallback {
+                    self.check_for_codex_update();
+                }
                 self.state.connection_text = "Connecting…".into();
                 self.request("initialize", json!({"clientInfo":{"name":"ferro-code","title":"Ferro Code","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true,"requestAttestation":false}}), PendingCall::Initialize);
             }

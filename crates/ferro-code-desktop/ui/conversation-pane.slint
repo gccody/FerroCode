@@ -282,7 +282,7 @@ export component ConversationPane inherits Rectangle {
                 composer := ComposerEdit {
                     x: 13px; y: 10px; width: parent.width - 26px; height: parent.input-height;
                     enabled: root.connected && root.has-project && !root.busy;
-                    placeholder-text: !root.has-project ? "Add a project folder before starting a thread" : root.connected ? "Ask for a follow-up or describe a task" : "Waiting for Codex CLI...";
+                    placeholder-text: !root.has-project ? "Add a project folder before starting a thread" : root.connected ? "Ask for a follow-up or describe a task" : "Waiting for Codex...";
                     key-pressed(event) => {
                         if event.modifiers.control && (event.text == "v" || event.text == "V") {
                             if root.paste-image() { return accept; }
