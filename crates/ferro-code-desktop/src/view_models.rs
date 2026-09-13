@@ -266,6 +266,17 @@ pub(super) fn message_rows_match(current: &MessageRow, next: &MessageRow) -> boo
         && current.duration_label == next.duration_label
         && current.row_height == next.row_height
         && current.scroll_offset == next.scroll_offset
+        && current.attachments.row_count() == next.attachments.row_count()
+        && current
+            .attachments
+            .iter()
+            .zip(next.attachments.iter())
+            .all(|(a, b)| {
+                a.index == b.index
+                    && a.name == b.name
+                    && a.image == b.image
+                    && a.preview == b.preview
+            })
 }
 
 fn message_scroll_height(row: &MessageRow) -> f32 {
