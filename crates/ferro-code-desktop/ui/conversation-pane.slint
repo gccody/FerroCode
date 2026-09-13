@@ -37,7 +37,9 @@ export component ConversationPane inherits Rectangle {
     in-out property <int> selected-effort-index: 0;
     in-out property <int> selected-sandbox-index: 1;
 
-    callback send-message(string);
+    in-out property <string> draft-text;
+    callback edit-draft(string);
+    callback send-message(string) -> bool;
     callback stop-turn;
     callback attach-files;
     callback paste-image() -> bool;
@@ -280,6 +282,8 @@ export component ConversationPane inherits Rectangle {
                 border-color: #303138;
                 border-radius: 14px;
                 composer := ComposerEdit {
+                    text <=> root.draft-text;
+                    edited(text) => { root.edit-draft(text); }
                     x: 13px; y: 10px; width: parent.width - 26px; height: parent.input-height;
                     enabled: root.connected && root.has-project && !root.busy;
                     placeholder-text: !root.has-project ? "Add a project folder before starting a thread" : root.connected ? "Ask for a follow-up or describe a task" : "Waiting for Codex...";
@@ -289,7 +293,7 @@ export component ConversationPane inherits Rectangle {
                             return reject;
                         }
                         if event.text == "\n" && !event.modifiers.shift {
-                            if composer.text != "" { root.send-message(composer.text); composer.text = ""; }
+                            if (composer.text != "" || root.attachments.length > 0) && root.send-message(composer.text) { composer.text = ""; }
                             return accept;
                         }
                         return reject;
@@ -354,7 +358,7 @@ export component ConversationPane inherits Rectangle {
                         width: 31px; height: 31px; border-radius: 16px;
                         background: send-touch.has-hover ? #765dcc : #654db9;
                         SendMark { x: (parent.width - self.width) / 2 + 0.5px; y: (parent.height - self.height) / 2; }
-                        send-touch := TouchArea { enabled: root.connected && root.has-project; mouse-cursor: pointer; clicked => { if composer.text != "" { root.send-message(composer.text); composer.text = ""; } } }
+                        send-touch := TouchArea { enabled: root.connected && root.has-project; mouse-cursor: pointer; clicked => { if (composer.text != "" || root.attachments.length > 0) && root.send-message(composer.text) { composer.text = ""; } } }
                     }
                 }
             }

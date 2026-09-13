@@ -1,11 +1,12 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use ferro_code_app::Controller;
-use ferro_code_core::LocalStore;
+use ferro_code_core::{LocalStore, PersistenceWorker};
 use slint::{ComponentHandle, Timer, TimerMode};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     rc::Rc,
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -13,6 +14,7 @@ slint::include_modules!();
 
 mod attachments;
 mod callbacks;
+mod desktop_services;
 mod markdown;
 mod project_launcher;
 mod sync;
@@ -77,7 +79,39 @@ fn main() -> Result<(), slint::PlatformError> {
     select_macos_backend()?;
 
     let store = LocalStore::discover();
-    let persisted = store.load().unwrap_or_default();
+    let session = match store.open_session() {
+        Ok(session) => session,
+        Err(error) => {
+            rfd::MessageDialog::new()
+                .set_title("History unavailable")
+                .set_description(error.to_string())
+                .set_level(rfd::MessageLevel::Error)
+                .show();
+            return Ok(());
+        }
+    };
+    let (persisted, storage_warning, writable) = match session.load() {
+        Ok((state, warning)) => (state, warning, true),
+        Err(error) => (
+            Default::default(),
+            Some(format!(
+                "History could not be loaded: {error}. Saving is paused. Restore a backup in Settings. Original: {}",
+                store.path().display()
+            )),
+            false,
+        ),
+    };
+    let writer = match PersistenceWorker::start(session, writable) {
+        Ok(writer) => Arc::new(writer),
+        Err(error) => {
+            rfd::MessageDialog::new()
+                .set_title("History unavailable")
+                .set_description(error)
+                .show();
+            return Ok(());
+        }
+    };
+    let saving_enabled = Rc::new(Cell::new(writable));
     let controller = Rc::new(RefCell::new(Controller::new(persisted)));
     controller.borrow_mut().start();
     let ui = MainWindow::new()?;
@@ -94,16 +128,19 @@ fn main() -> Result<(), slint::PlatformError> {
     install_input_focus_dismissal(&ui);
     let _window_chrome_timer = install_window_chrome(&ui);
     let search = Rc::new(RefCell::new(String::new()));
-    let attachments = Rc::new(RefCell::new(Vec::<PendingAttachment>::new()));
-    let attachment_temp_dir = Rc::new(tempfile::tempdir().ok());
+    if let Some(warning) = storage_warning {
+        ui.set_storage_status(warning.clone().into());
+        controller.borrow_mut().state.error(warning);
+    }
 
-    wire_callbacks(
+    wire_callbacks(&ui, &controller, &search, &open_methods);
+    let _services_timer = desktop_services::wire_services(
         &ui,
         &controller,
         &search,
-        &attachments,
-        &attachment_temp_dir,
-        &open_methods,
+        store.clone(),
+        writer.clone(),
+        saving_enabled.clone(),
     );
     sync_ui(&ui, &controller.borrow(), &search.borrow());
 
@@ -153,22 +190,48 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let save_controller = controller.clone();
-    let save_store = store.clone();
+    let save_writer = writer.clone();
+    let save_enabled = saving_enabled.clone();
+    let save_ui = ui.as_weak();
     let last_saved_revision = Rc::new(RefCell::new(0_u64));
     let save_revision = last_saved_revision.clone();
     let save_timer = Timer::default();
     save_timer.start(TimerMode::Repeated, Duration::from_secs(2), move || {
+        for saved in save_writer.results.try_iter() {
+            if let Err(error) = saved.result {
+                if let Some(ui) = save_ui.upgrade() {
+                    ui.set_storage_status(format!("History save failed: {error}").into());
+                }
+                *save_revision.borrow_mut() = 0;
+            } else if let Some(ui) = save_ui.upgrade() {
+                ui.set_storage_status("".into());
+            }
+        }
+        if !save_enabled.get() {
+            return;
+        }
         let revision = save_controller.borrow().state.revision;
         if revision != *save_revision.borrow() {
             let state = save_controller.borrow_mut().persisted();
-            if save_store.save(&state).is_ok() {
+            if save_writer.save(state, revision) {
                 *save_revision.borrow_mut() = revision;
             }
         }
     });
 
     ui.run()?;
-    let _ = store.save(&controller.borrow_mut().persisted());
+    if saving_enabled.get()
+        && let Err(error) = writer.flush(controller.borrow_mut().persisted(), false)
+    {
+        rfd::MessageDialog::new()
+            .set_title("History could not be saved")
+            .set_description(format!(
+                "{error}\nThe previous saved generation is retained at {}",
+                store.path().display()
+            ))
+            .set_level(rfd::MessageLevel::Error)
+            .show();
+    }
     Ok(())
 }
 

@@ -10,12 +10,16 @@ export component MessageCard inherits Rectangle {
     callback toggle-activity-group(string);
     callback toggle-response-details(string);
     horizontal-stretch: 1;
-    private property <length> content-height: message.activity && !message.collapsed && message.body != ""
+    private property <length> content-height: message.user
+        ? max(48px, user-measure.preferred-height + 26px) + (message.attachments.length > 0 ? 82px : 0px)
+        : message.activity && !message.collapsed && message.body != ""
         ? activity-body.preferred-height + 44px
         : message.row-height;
     // Keep a clear, consistent pause between each side of the conversation.
     height: self.content-height + 10px;
     background: transparent;
+
+    user-measure := Text { visible: false; width: max(1px, min(650px, root.width - 18px) - 28px); text: message.body; font-size: 13px; wrap: word-wrap; }
 
     if message.user: Rectangle {
         // Use the renderer's proportional-font measurement so every bubble
@@ -101,6 +105,10 @@ export component MessageCard inherits Rectangle {
             color: activity-touch.has-hover ? #d0d1d6 : #989aa2;
             font-size: 12px;
             vertical-alignment: TextVerticalAlignment.center; overflow: elide;
+        }
+        if message.status == "failed" || message.status == "declined" || message.status == "interrupted": Text {
+            x: parent.width - 92px; width: 86px; height: 38px; text: message.status; color: #f08089;
+            vertical-alignment: TextVerticalAlignment.center; font-size: 11px;
         }
         if message.status == "running": Spinner { x: parent.width - 25px; y: 12px; width: 14px; height: 14px; }
         activity-touch := TouchArea {

@@ -62,10 +62,25 @@ pub(crate) fn inspect(
         .as_deref()
         .and_then(|status| status.lines().next())
         .unwrap_or_default();
-    let diff = status
-        .as_deref()
-        .map(|status| status.lines().skip(1).collect::<Vec<_>>().join("\n"))
-        .unwrap_or_default();
+    let changes = if is_repository {
+        hidden_command("git")
+            .args([
+                "-C",
+                root,
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+            ])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| parse_status(&output.stdout))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let diff = serde_json::to_string(&changes).unwrap_or_default();
     let mut files = if respect_gitignore && is_repository {
         git_visible_files(root).unwrap_or_else(|| filesystem_files(root))
     } else {
@@ -99,7 +114,7 @@ pub(crate) fn inspect(
         has_github_remote && has_commits
     };
 
-    let has_changes = !diff.trim().is_empty();
+    let has_changes = !changes.is_empty();
     WorkspaceSnapshot {
         diff,
         files,
@@ -115,33 +130,115 @@ pub(crate) fn inspect(
     }
 }
 
-pub(crate) fn commit_context(root: &str) -> Result<String, String> {
-    let status = run_command("git", &["-C", root, "status", "--short"])?;
-    let diff = command_stdout(
-        "git",
-        &["-C", root, "diff", "--no-ext-diff", "--stat", "--"],
-    )
-    .unwrap_or_default();
-    let patch = command_stdout(
+#[derive(Debug, Clone)]
+pub(crate) struct CommitSnapshot {
+    pub context: String,
+    tree: String,
+    head: Option<String>,
+}
+
+fn require_repository_root(root: &str) -> Result<(), String> {
+    let repository = run_command("git", &["-C", root, "rev-parse", "--show-toplevel"])?;
+    let canonical = Path::new(root).canonicalize().map_err(|e| e.to_string())?;
+    let repository_path = Path::new(&repository)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    if canonical != repository_path {
+        return Err(format!(
+            "This project is inside a larger repository. Select the repository root ({repository}) before committing; no files were staged."
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn commit_context(root: &str) -> Result<CommitSnapshot, String> {
+    require_repository_root(root)?;
+    // Capture the complete commit before asking for its subject. Subsequent
+    // unstaged edits remain in the working directory for the next commit.
+    run_command("git", &["-C", root, "add", "--all", "--", "."])?;
+    let tree = run_command("git", &["-C", root, "write-tree"])?;
+    let head = command_stdout("git", &["-C", root, "rev-parse", "--verify", "HEAD"]);
+    let diff = run_command(
         "git",
         &[
             "-C",
             root,
             "diff",
+            "--cached",
+            "--no-ext-diff",
+            "--stat",
+            "--",
+        ],
+    )?;
+    let patch = run_command(
+        "git",
+        &[
+            "-C",
+            root,
+            "diff",
+            "--cached",
             "--no-ext-diff",
             "--",
             ":(exclude)Cargo.lock",
         ],
-    )
-    .unwrap_or_default();
-    let context = format!("Changed files:\n{status}\nDiff summary:\n{diff}\nDiff:\n{patch}");
-    Ok(context.chars().take(24_000).collect())
+    )?;
+    Ok(CommitSnapshot {
+        context: format!("Staged snapshot: {tree}\n{diff}\n{patch}")
+            .chars()
+            .take(24_000)
+            .collect(),
+        tree,
+        head,
+    })
 }
 
-pub(crate) fn commit(root: &str, message: &str) -> Result<String, String> {
-    run_command("git", &["-C", root, "add", "--all"])?;
+pub(crate) fn commit_snapshot(
+    root: &str,
+    message: &str,
+    snapshot: &CommitSnapshot,
+) -> Result<String, String> {
+    require_repository_root(root)?;
+    if run_command("git", &["-C", root, "write-tree"])? != snapshot.tree
+        || command_stdout("git", &["-C", root, "rev-parse", "--verify", "HEAD"]) != snapshot.head
+    {
+        return Err("The staged changes or branch changed while generating the summary. Review the index and click Commit again.".into());
+    }
     run_command("git", &["-C", root, "commit", "-m", message])?;
-    Ok(format!("Committed changes: {message}"))
+    Ok(format!("Committed staged changes: {message}"))
+}
+
+#[cfg(test)]
+pub(crate) fn commit(root: &str, message: &str) -> Result<String, String> {
+    let snapshot = commit_context(root)?;
+    commit_snapshot(root, message, &snapshot)
+}
+
+fn parse_status(bytes: &[u8]) -> Vec<ferro_code_core::GitChange> {
+    let mut records = bytes
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty());
+    let mut changes = Vec::new();
+    while let Some(record) = records.next() {
+        if record.len() < 4 || record[2] != b' ' {
+            continue;
+        }
+        let index = record[0] as char;
+        let worktree = record[1] as char;
+        let original_path = if matches!(index, 'R' | 'C') || matches!(worktree, 'R' | 'C') {
+            records
+                .next()
+                .map(|path| String::from_utf8_lossy(path).into_owned())
+        } else {
+            None
+        };
+        changes.push(ferro_code_core::GitChange {
+            index,
+            worktree,
+            path: String::from_utf8_lossy(&record[3..]).into_owned(),
+            original_path,
+        });
+    }
+    changes
 }
 
 pub(crate) fn run_action(
@@ -298,6 +395,7 @@ fn git_visible_files(root: &str) -> Option<Vec<String>> {
             "-C",
             root,
             "ls-files",
+            "-z",
             "--cached",
             "--others",
             "--exclude-standard",
@@ -308,8 +406,8 @@ fn git_visible_files(root: &str) -> Option<Vec<String>> {
 
     Some(
         String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter(|path| visible_relative_path(Path::new(path)))
+            .split('\0')
+            .filter(|path| !path.is_empty() && visible_relative_path(Path::new(path)))
             .map(|path| path.replace('/', std::path::MAIN_SEPARATOR_STR))
             .collect(),
     )

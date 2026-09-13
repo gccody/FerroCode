@@ -103,7 +103,20 @@ export component MainWindow inherits Window {
     callback open-thread(string);
     callback archive-thread(string);
     callback search-threads(string);
-    callback send-message(string);
+    in-out property <string> draft-text;
+    in property <bool> archive-available;
+    in property <bool> usage-loading;
+    in property <string> usage-error;
+    in-out property <string> storage-status;
+    in-out property <bool> storage-busy: false;
+    callback edit-draft(string);
+    callback reconnect;
+    callback retry-prompt;
+    callback undo-archive;
+    callback export-history;
+    callback restore-history;
+    callback export-diagnostics;
+    callback send-message(string) -> bool;
     callback stop-turn;
     callback attach-files;
     callback paste-image() -> bool;
@@ -198,6 +211,8 @@ export component MainWindow inherits Window {
             }
 
             ConversationPane {
+                draft-text <=> root.draft-text;
+                edit-draft(text) => { root.edit-draft(text); }
                 messages: root.messages;
                 message-revision: root.message-revision;
                 message-content-height: root.message-content-height;
@@ -225,7 +240,7 @@ export component MainWindow inherits Window {
                 selected-model-index <=> root.selected-model-index;
                 selected-effort-index <=> root.selected-effort-index;
                 selected-sandbox-index <=> root.selected-sandbox-index;
-                send-message(text) => { root.send-message(text); }
+                send-message(text) => { return root.send-message(text); }
                 stop-turn => { root.stop-turn(); }
                 attach-files => { root.attach-files(); }
                 paste-image => { root.paste-image() }
@@ -280,6 +295,17 @@ export component MainWindow inherits Window {
         usage-summary: root.usage-summary;
         reset-count: root.reset-count;
         reset-in-progress: root.reset-in-progress;
+        connection-text: root.connection-text;
+        storage-status: root.storage-status;
+        archive-available: root.archive-available;
+        usage-loading: root.usage-loading;
+        usage-error: root.usage-error;
+        reconnect => { root.reconnect(); }
+        retry-prompt => { root.retry-prompt(); root.settings-visible = false; }
+        undo-archive => { root.undo-archive(); }
+        export-history => { root.export-history(); }
+        restore-history => { root.restore-history(); }
+        export-diagnostics => { root.export-diagnostics(); }
         close => { root.settings-visible = false; }
         select-default-model(value) => { root.select-default-model(value); }
         select-default-effort(value) => { root.select-default-effort(value); }
@@ -318,7 +344,7 @@ export component MainWindow inherits Window {
         dismiss(revision) => { root.dismiss-toast(revision); }
     }
 
-    if root.startup-loading: LoadingOverlay {
+    if root.startup-loading || root.storage-busy: LoadingOverlay {
         y: 36px;
         height: parent.height - 36px;
     }

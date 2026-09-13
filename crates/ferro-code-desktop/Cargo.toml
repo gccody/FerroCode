@@ -11,7 +11,8 @@ build = "build.rs"
 arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
 ferro-code-app.workspace = true
 ferro-code-core.workspace = true
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff"] }
+serde_json.workspace = true
 slint.workspace = true
 tempfile = "3"
 

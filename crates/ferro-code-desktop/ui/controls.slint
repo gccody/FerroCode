@@ -108,6 +108,7 @@ export component ComposerEdit inherits Rectangle {
     in property <bool> enabled: true;
     out property <length> content-height: input.preferred-height;
     callback key-pressed(KeyEvent) -> EventResult;
+    callback edited(string);
     accessible-role: text-input;
     accessible-enabled: enabled;
     accessible-value: text;
@@ -138,6 +139,7 @@ export component ComposerEdit inherits Rectangle {
             single-line: false;
             page-height: edit-scroll.visible-height;
             key-pressed(event) => { root.key-pressed(event) }
+            edited => { root.edited(self.text); }
             cursor-position-changed(position) => {
                 if position.y + edit-scroll.viewport-y < 0px {
                     edit-scroll.viewport-y = min(

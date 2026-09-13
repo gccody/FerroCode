@@ -68,8 +68,13 @@ struct ActiveSummary {
 
 #[derive(Debug, Clone)]
 enum SummaryTarget {
-    ThreadTitle { local_thread_id: String },
-    GitCommit { root: String },
+    ThreadTitle {
+        local_thread_id: String,
+    },
+    GitCommit {
+        root: String,
+        snapshot: workspace::CommitSnapshot,
+    },
 }
 
 pub struct Controller {
@@ -81,6 +86,7 @@ pub struct Controller {
     workspace_snapshots: HashMap<String, workspace::WorkspaceSnapshot>,
     github_configuration: Option<bool>,
     git_action_rx: Option<Receiver<Result<String, String>>>,
+    commit_prepare_rx: Option<Receiver<(String, Result<workspace::CommitSnapshot, String>)>>,
     update_check_rx: Option<Receiver<Result<Option<String>, String>>>,
     update_install_rx: Option<Receiver<Result<(), String>>>,
     pending: HashMap<u64, PendingCall>,
@@ -106,6 +112,7 @@ impl Controller {
             workspace_snapshots: HashMap::new(),
             github_configuration: None,
             git_action_rx: None,
+            commit_prepare_rx: None,
             update_check_rx: None,
             update_install_rx: None,
             pending: HashMap::new(),
@@ -208,6 +215,26 @@ impl Controller {
             let result_is_active = same_workspace(root.as_deref(), active_root);
             if result_is_active {
                 self.apply_workspace_snapshot(snapshot);
+            }
+        }
+        if let Some((root, result)) = self
+            .commit_prepare_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok())
+        {
+            self.commit_prepare_rx = None;
+            match result {
+                Ok(snapshot) if self.state.connected => self.start_commit_summary(root, snapshot),
+                Ok(_) => {
+                    self.state.git_action_in_progress = false;
+                    self.state.error(
+                        "Codex disconnected while staging. Your staged changes are retained.",
+                    );
+                }
+                Err(error) => {
+                    self.state.git_action_in_progress = false;
+                    self.state.error(error);
+                }
             }
         }
         if let Some(result) = self
@@ -321,7 +348,7 @@ impl Controller {
         self.state.user_question_queue.clear();
         self.state.usage_loading = false;
         self.state.reset_in_progress = false;
-        if self.git_action_rx.is_none() {
+        if self.git_action_rx.is_none() && self.commit_prepare_rx.is_none() {
             self.state.git_action_in_progress = false;
         }
         self.summary_pending.clear();
@@ -416,6 +443,37 @@ impl Controller {
         }
     }
 
+    pub fn restore_history(&mut self, persisted: PersistedState) {
+        self.clear_backend_state();
+        self.state = AppState::from_persisted(persisted);
+        self.workspace_snapshots.clear();
+        self.restart_workspace_inspection();
+        self.start();
+    }
+
+    pub fn diagnostics(&self) -> Value {
+        json!({"applicationVersion":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"architecture":std::env::consts::ARCH,
+            "connection":self.state.connection_text,"connected":self.state.connected,"pendingRequests":self.pending.len(),
+            "runningTurns":self.state.running_turns.len(),"projects":self.state.projects.len(),"threads":self.state.threads.len(),
+            "archivedThreads":self.state.archived_threads.len(),"usageLoading":self.state.usage_loading,
+            "note":"Conversation content, account identifiers, credentials, and command output are omitted."})
+    }
+
+    pub fn restore_last_prompt(&mut self) {
+        if let Some(item) = self
+            .state
+            .conversation
+            .iter()
+            .rev()
+            .find(|item| item.kind == ItemKind::User)
+        {
+            self.state.set_draft(ferro_code_core::Draft {
+                text: item.body.clone(),
+                attachments: item.attachments.clone(),
+            });
+        }
+    }
+
     pub fn add_project(&mut self, path: String) {
         self.state.add_project(path, unix_timestamp());
         self.state.new_thread(unix_timestamp());
@@ -478,20 +536,20 @@ impl Controller {
         self.state.toggle_response_details(id);
     }
 
-    pub fn send_prompt(&mut self, text: String, attachments: Vec<String>) {
+    pub fn send_prompt(&mut self, text: String, attachments: Vec<String>) -> bool {
         let text = text.trim().to_owned();
-        if text.is_empty()
+        if (text.is_empty() && attachments.is_empty())
             || self.state.active_thread_busy()
             || !self.state.connected
             || self.state.active_project.is_none()
         {
-            return;
+            return false;
         }
         if self.state.active_local_thread.is_none() {
             self.state.new_thread(unix_timestamp());
         }
         let Some(local_thread_id) = self.state.active_local_thread.clone() else {
-            return;
+            return false;
         };
 
         let restore_context = !self.state.runtime_threads.contains_key(&local_thread_id);
@@ -544,6 +602,25 @@ impl Controller {
             }
         }
         let mut input = vec![json!({"type":"text","text":turn_text,"text_elements":[]})];
+        if restore_context {
+            let mut historical = HashSet::new();
+            for path in self
+                .state
+                .conversation
+                .iter()
+                .rev()
+                .skip(1)
+                .flat_map(|item| item.attachments.iter())
+            {
+                if historical.insert(path.clone()) {
+                    if Path::new(path).is_file() {
+                        input.push(attachment_input(path.clone()));
+                    } else {
+                        input.push(json!({"type":"text","text":format!("Previously attached file is unavailable: {path}"),"text_elements":[]}));
+                    }
+                }
+            }
+        }
         input.extend(attachments.into_iter().map(attachment_input));
         let agent = self.state.active_agent();
         let turn = PendingTurn {
@@ -579,6 +656,7 @@ impl Controller {
                 },
             );
         }
+        true
     }
 
     pub fn interrupt(&mut self) {
@@ -800,9 +878,21 @@ impl Controller {
                     .error("Codex must be connected to create the commit summary");
                 return;
             }
-            match workspace::commit_context(&root) {
-                Ok(context) => self.start_commit_summary(root, &context),
-                Err(error) => self.state.error(error),
+            let (tx, rx) = unbounded();
+            self.commit_prepare_rx = Some(rx);
+            self.state.git_action_in_progress = true;
+            self.state.touch();
+            if let Err(error) =
+                thread::Builder::new()
+                    .name("commit-snapshot".into())
+                    .spawn(move || {
+                        let result = workspace::commit_context(&root);
+                        let _ = tx.send((root, result));
+                    })
+            {
+                self.commit_prepare_rx = None;
+                self.state.git_action_in_progress = false;
+                self.state.error(error.to_string());
             }
         } else if !git.has_github_remote {
             if !git.github_configured {
@@ -843,6 +933,7 @@ impl Controller {
     }
 
     fn attach_backend(&mut self, result: Result<CodexBackend, String>) {
+        self.startup_deadline = None;
         match result {
             Ok(backend) => {
                 let uses_cli_fallback = backend.uses_cli_fallback();
@@ -1209,7 +1300,7 @@ impl Controller {
         );
     }
 
-    fn start_commit_summary(&mut self, root: String, context: &str) {
+    fn start_commit_summary(&mut self, root: String, snapshot: workspace::CommitSnapshot) {
         let key = format!("git-commit:{root}");
         if !self.summary_pending.insert(key.clone()) {
             return;
@@ -1228,10 +1319,10 @@ impl Controller {
             }),
             PendingCall::SummaryThreadStart(SummaryJob {
                 key,
-                target: SummaryTarget::GitCommit { root: root.clone() },
+                target: SummaryTarget::GitCommit { root: root.clone(), snapshot: snapshot.clone() },
                 prompt: format!(
                     "Write a concise Git commit subject for these changes. Use imperative mood, stay under 72 characters, and return only the subject with no quotes or explanation. Do not call tools.\n\n{}",
-                    truncate_text(context, 24_000)
+                    truncate_text(&snapshot.context, 24_000)
                 ),
                 cwd: root,
                 model: self.state.prefs.summary_model.clone(),
@@ -1542,7 +1633,7 @@ impl Controller {
                             thread.title_generated = true;
                         }
                     }
-                    SummaryTarget::GitCommit { root } => {
+                    SummaryTarget::GitCommit { root, snapshot } => {
                         let status = params
                             .pointer("/turn/status")
                             .and_then(Value::as_str)
@@ -1561,7 +1652,7 @@ impl Controller {
                             self.state
                                 .error("The summary model did not return a commit message");
                         } else {
-                            self.spawn_git_commit(root, message);
+                            self.spawn_git_commit(root, message, snapshot);
                         }
                     }
                 }
@@ -1572,13 +1663,18 @@ impl Controller {
         true
     }
 
-    fn spawn_git_commit(&mut self, root: String, message: String) {
+    fn spawn_git_commit(
+        &mut self,
+        root: String,
+        message: String,
+        snapshot: workspace::CommitSnapshot,
+    ) {
         let (tx, rx) = unbounded();
         self.git_action_rx = Some(rx);
         if let Err(error) = thread::Builder::new()
             .name("git-commit".into())
             .spawn(move || {
-                let _ = tx.send(workspace::commit(&root, &message));
+                let _ = tx.send(workspace::commit_snapshot(&root, &message, &snapshot));
             })
         {
             self.git_action_rx = None;
@@ -2268,6 +2364,7 @@ mod audit_controller {
         let id = c.state.new_thread(2).unwrap();
         c.state.runtime_threads.insert(id.clone(), "runtime".into());
         c.state.begin_turn(id.clone(), 100);
+        c.turn_generations.insert(id.clone(), 1);
         c.handle_notification(
             "turn/completed",
             json!({"threadId":"runtime","turn":{"id":"turn", "status":"completed"}}),
