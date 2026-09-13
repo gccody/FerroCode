@@ -2,11 +2,12 @@
 
 Ferro Code is a lightweight native desktop control surface for Codex. It runs on Windows, macOS, and Linux, embeds Codex's Rust app-server SDK, reuses existing ChatGPT subscription or API authentication, and stores projects and conversation history locally.
 
-The desktop UI is implemented in [Slint](https://slint.dev/) with its software renderer. There is no Electron shell, browser UI, webview, JavaScript frontend, or hosted middleman.
+The desktop UI is implemented in [Slint](https://slint.dev/) with the Skia renderer. There is no Electron shell, browser UI, webview, JavaScript frontend, or hosted middleman.
 
 ## Features
 
-- Local project and thread history with staged JSON persistence
+- Versioned local history with atomic background saves, a recovery generation, and a single-writer lock
+- Per-thread drafts, durable attachments, portable backup export/restore, and undoable archive
 - Ephemeral Codex transport threads reconstructed from saved local conversations
 - Live assistant messages, reasoning, plans, commands, tools, and file changes
 - Model, reasoning-effort, sandbox, and approval controls
@@ -14,7 +15,8 @@ The desktop UI is implemented in [Slint](https://slint.dev/) with its software r
 - Structured `request_user_input` questions
 - Image paste previews and arbitrary file attachments through native system pickers
 - Stop/interrupt support
-- Thread search and removal
+- Thread search and archive
+- Reconnect, prompt recovery, request deadlines, and diagnostic export in Settings
 - Workspace file list, activity timeline, and Git status inspector
 - Codex account, plan, model, and context-window information
 - In-app Codex update notifications with one-click installation
@@ -22,7 +24,7 @@ The desktop UI is implemented in [Slint](https://slint.dev/) with its software r
 ## Requirements
 
 - Windows 10 or later, macOS, or a Linux desktop with X11 or Wayland and an XDG desktop portal
-- Rust 1.95 or later
+- Rust 1.97.1, selected automatically by `rust-toolchain.toml` (workspace minimum: 1.95)
 - Codex CLI installed and available as `codex` on `PATH` for compatibility fallback; it is not invoked when the embedded SDK starts successfully
 - An existing Codex login (`codex login`) or another supported Codex authentication method
 
@@ -47,6 +49,10 @@ Local state follows each operating system's standard data location:
 | Windows | `%LOCALAPPDATA%\Ferro Code\state.json` |
 | macOS | `~/Library/Application Support/Ferro Code/state.json` |
 | Linux | `${XDG_DATA_HOME:-~/.local/share}/ferro-code/state.json` |
+
+Attachments are copied into the `attachments` directory beside local state. Keep an exported backup JSON file together with its matching `.files` directory when moving it. Restore imports those files into the destination application's storage. A previous valid state is retained in `state.json.bak`; damaged or explicitly replaced state is preserved separately. If no valid generation can be loaded, saving pauses and a persistent notice directs you to restore a backup in Settings.
+
+The Commit action stages the selected repository's changes before generating its subject. Later unstaged edits stay in the working directory; if the index or branch changes during generation, committing stops with an error. Select the repository root to commit a project inside a larger repository.
 
 ## Test and lint
 
@@ -81,4 +87,4 @@ cargo test -p ferro-code-protocol
 | `ferro-code-app` | Testable application state machine and workspace inspection | None |
 | `ferro-code` | Slint components, native dialogs, and state-to-view projection | Slint |
 
-The split keeps protocol and domain changes out of the Slint build graph, gives each layer a narrow API, and permits fast crate-scoped tests. See [docs/refactor-notes.md](docs/refactor-notes.md) for the measured baseline and results.
+The split keeps protocol and domain changes out of the Slint build graph, gives each layer a narrow API, and permits fast crate-scoped tests. See [the audit](docs/audit-2026-09-12.md) and [implementation notes](docs/reliability-release.md) for findings, fixes, and validation.
