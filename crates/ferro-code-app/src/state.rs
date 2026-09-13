@@ -41,6 +41,8 @@ pub struct AppState {
     pub models: Vec<ModelOption>,
     pub projects: Vec<Project>,
     pub threads: Vec<LocalThread>,
+    pub archived_threads: Vec<LocalThread>,
+    pub drafts: HashMap<String, ferro_code_core::Draft>,
     pub active_project: Option<String>,
     pub active_local_thread: Option<String>,
     pub runtime_threads: HashMap<String, String>,
@@ -78,6 +80,8 @@ impl AppState {
             models: Vec::new(),
             projects: Vec::new(),
             threads: Vec::new(),
+            archived_threads: Vec::new(),
+            drafts: HashMap::new(),
             active_project: None,
             active_local_thread: None,
             runtime_threads: HashMap::new(),
@@ -110,6 +114,8 @@ impl AppState {
         PersistedState {
             preferences: self.prefs.clone(),
             history: AppHistory {
+                archived_threads: self.archived_threads.clone(),
+                drafts: self.drafts.clone(),
                 projects: self.projects.clone(),
                 threads: self.threads.clone(),
                 active_project: self.active_project.clone(),
@@ -145,6 +151,8 @@ impl AppState {
         {
             self.prefs.workspace.clone_from(&project.path);
         }
+        self.archived_threads = history.archived_threads;
+        self.drafts = history.drafts;
         self.projects = history.projects;
         self.threads = history.threads;
         self.active_project = active_project;
@@ -301,13 +309,14 @@ impl AppState {
         if let Some(existing) = self
             .projects
             .iter()
-            .find(|project| project.path.eq_ignore_ascii_case(&path))
+            .find(|project| ferro_code_core::same_path(&project.path, &path))
         {
             let id = existing.id.clone();
             self.select_project(&id);
             return id;
         }
-        let id = format!("project-{now}-{}", self.projects.len() + 1);
+        self.sync_active_conversation();
+        let id = ferro_code_core::new_id("project");
         let name = std::path::Path::new(&path)
             .file_name()
             .and_then(|value| value.to_str())
@@ -333,7 +342,7 @@ impl AppState {
     pub fn new_thread(&mut self, now: i64) -> Option<String> {
         let project_id = self.active_project.clone()?;
         self.sync_active_conversation();
-        let id = format!("thread-{now}-{}", self.threads.len() + 1);
+        let id = ferro_code_core::new_id("thread");
         self.threads.push(LocalThread {
             id: id.clone(),
             project_id,
@@ -475,8 +484,11 @@ impl AppState {
             self.info("Stop this thread before archiving it");
             return false;
         }
+        self.sync_active_conversation();
         let old_len = self.threads.len();
-        self.threads.retain(|thread| thread.id != id);
+        if let Some(index) = self.threads.iter().position(|thread| thread.id == id) {
+            self.archived_threads.push(self.threads.remove(index));
+        }
         self.runtime_threads.remove(id);
         if self.active_local_thread.as_deref() == Some(id) {
             self.active_local_thread = None;
@@ -487,6 +499,41 @@ impl AppState {
             self.touch();
         }
         changed
+    }
+
+    pub fn undo_archive(&mut self) {
+        if let Some(thread) = self.archived_threads.pop() {
+            let id = thread.id.clone();
+            self.threads.push(thread);
+            self.open_thread(&id);
+            self.touch();
+        }
+    }
+
+    pub fn draft_key(&self) -> String {
+        self.active_local_thread.clone().unwrap_or_else(|| {
+            format!(
+                "project-draft:{}",
+                self.active_project.as_deref().unwrap_or("none")
+            )
+        })
+    }
+    pub fn active_draft(&self) -> ferro_code_core::Draft {
+        self.drafts
+            .get(&self.draft_key())
+            .cloned()
+            .unwrap_or_default()
+    }
+    pub fn set_draft(&mut self, draft: ferro_code_core::Draft) {
+        let key = self.draft_key();
+        if self.drafts.get(&key) != Some(&draft) {
+            if draft.text.is_empty() && draft.attachments.is_empty() {
+                self.drafts.remove(&key);
+            } else {
+                self.drafts.insert(key, draft);
+            }
+            self.touch();
+        }
     }
 
     pub fn enqueue_approval(&mut self, approval: Approval) {
@@ -696,6 +743,8 @@ mod tests {
     fn invalid_active_ids_are_discarded() {
         let mut state = state();
         state.apply_history(AppHistory {
+            archived_threads: Vec::new(),
+            drafts: Default::default(),
             projects: vec![],
             threads: vec![],
             active_project: Some("missing".into()),
@@ -1064,5 +1113,42 @@ mod tests {
         assert_eq!(restored.active_agent().effort, "xhigh");
         assert_eq!(restored.prefs.model, "gpt-5.6-sol");
         assert_eq!(restored.prefs.effort, "high");
+    }
+}
+
+#[cfg(test)]
+mod audit {
+    use super::AppState;
+    use ferro_code_core::{ConversationItem, ItemKind, PersistedState};
+    #[test]
+    fn adding_project_preserves_active_stream() {
+        let mut state = AppState::from_persisted(PersistedState::default());
+        state.add_project("first".into(), 1);
+        let first = state.new_thread(2).unwrap();
+        state.conversation.push(ConversationItem::new(
+            "stream",
+            ItemKind::Assistant,
+            "Codex",
+        ));
+        state.add_project("second".into(), 3);
+        state.open_thread(&first);
+        assert_eq!(
+            state.conversation.len(),
+            1,
+            "Adding a new project lost the unsynchronized message"
+        );
+    }
+    #[test]
+    fn thread_ids_remain_unique_after_removal() {
+        let mut state = AppState::from_persisted(PersistedState::default());
+        state.add_project("first".into(), 1);
+        let first = state.new_thread(2).unwrap();
+        let second = state.new_thread(2).unwrap();
+        state.archive_thread(&first);
+        let third = state.new_thread(2).unwrap();
+        assert_ne!(
+            second, third,
+            "A removed row allowed reuse of another thread's ID"
+        );
     }
 }

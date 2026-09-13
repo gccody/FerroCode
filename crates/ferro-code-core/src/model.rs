@@ -155,7 +155,17 @@ impl ConversationItem {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Draft {
+    pub text: String,
+    pub attachments: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppHistory {
+    #[serde(default)]
+    pub archived_threads: Vec<LocalThread>,
+    #[serde(default)]
+    pub drafts: std::collections::HashMap<String, Draft>,
     #[serde(default)]
     pub projects: Vec<Project>,
     #[serde(default)]
@@ -353,6 +363,7 @@ impl ResetCredit {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Approval {
+    pub local_thread_id: Option<String>,
     pub request_id: Value,
     pub method: String,
     pub title: String,
@@ -519,6 +530,8 @@ mod tests {
     #[test]
     fn history_round_trips_unicode_and_context_usage() {
         let history = AppHistory {
+            archived_threads: Vec::new(),
+            drafts: Default::default(),
             projects: vec![Project {
                 id: "p".into(),
                 name: "Δemo".into(),
