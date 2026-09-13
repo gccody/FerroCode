@@ -198,6 +198,9 @@ fn main() -> Result<(), slint::PlatformError> {
     let save_timer = Timer::default();
     save_timer.start(TimerMode::Repeated, Duration::from_secs(2), move || {
         for saved in save_writer.results.try_iter() {
+            if saved.revision == 0 {
+                *save_revision.borrow_mut() = 0;
+            }
             if let Err(error) = saved.result {
                 if let Some(ui) = save_ui.upgrade() {
                     ui.set_storage_status(format!("History save failed: {error}").into());

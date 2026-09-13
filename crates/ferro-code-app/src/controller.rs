@@ -477,6 +477,11 @@ impl Controller {
     }
 
     pub fn restore_last_prompt(&mut self) {
+        let draft = self.state.active_draft();
+        if !draft.text.is_empty() || !draft.attachments.is_empty() {
+            self.state.error("Your draft already has content. Send or clear it before restoring the last prompt.");
+            return;
+        }
         if let Some(item) = self
             .state
             .conversation
@@ -554,6 +559,17 @@ impl Controller {
     }
 
     pub fn send_prompt(&mut self, text: String, attachments: Vec<String>) -> bool {
+        if self
+            .state
+            .preparing_attachments
+            .get(&self.state.draft_key())
+            .copied()
+            .unwrap_or(0)
+            > 0
+        {
+            self.state.error("Attachments are still being prepared. Send again when they appear in the composer.");
+            return false;
+        }
         let text = text.trim().to_owned();
         if (text.is_empty() && attachments.is_empty())
             || self.state.active_thread_busy()
@@ -2479,6 +2495,19 @@ mod lifecycle_tests {
             .find(|v| v["method"] == method)
             .unwrap()
             .clone()
+    }
+    #[test]
+    fn pending_attachments_and_existing_drafts_are_not_silently_discarded() {
+        let (mut c, sent, _) = connected();
+        c.state.preparing_attachments.insert(c.state.draft_key(), 1);
+        assert!(!c.send_prompt("wait for my file".into(), vec![]));
+        assert!(sent.borrow().is_empty());
+        c.state.set_draft(ferro_code_core::Draft {
+            text: "unsent work".into(),
+            attachments: vec![],
+        });
+        c.restore_last_prompt();
+        assert_eq!(c.state.active_draft().text, "unsent work");
     }
     #[test]
     fn stop_before_thread_start_prevents_turn_request() {

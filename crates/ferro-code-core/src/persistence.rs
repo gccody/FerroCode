@@ -137,22 +137,30 @@ impl LocalStore {
         Ok(target)
     }
 
-    pub fn export(&self, state: &PersistedState, target: &Path) -> Result<(), StoreError> {
-        if let (Ok(target), Ok(primary)) = (target.canonicalize(), self.path.canonicalize()) {
-            if target == primary
-                || target
-                    == self
-                        .path
-                        .with_extension("json.bak")
-                        .canonicalize()
-                        .unwrap_or_default()
-            {
-                return Err(io::Error::other(
-                    "Choose an export path outside the active history files",
-                )
-                .into());
-            }
+    /// Protect active state and recovery files from explicit export destinations.
+    pub fn validate_export_target(&self, target: &Path) -> Result<(), StoreError> {
+        let resolved = |path: &Path| -> Option<PathBuf> {
+            path.canonicalize()
+                .ok()
+                .or_else(|| Some(path.parent()?.canonicalize().ok()?.join(path.file_name()?)))
+        };
+        let candidate = resolved(target);
+        let reserved = [
+            self.path.clone(),
+            self.path.with_extension("json.bak"),
+            self.path.with_extension("json.tmp"),
+            self.path.with_extension("lock"),
+        ];
+        if candidate.is_some() && reserved.iter().any(|path| resolved(path) == candidate) {
+            return Err(
+                io::Error::other("Choose an export path outside the active history files").into(),
+            );
         }
+        Ok(())
+    }
+
+    pub fn export(&self, state: &PersistedState, target: &Path) -> Result<(), StoreError> {
+        self.validate_export_target(target)?;
         // Export is portable: all referenced files accompany the JSON snapshot.
         let export_store = LocalStore::new(
             target

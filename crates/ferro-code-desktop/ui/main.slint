@@ -188,6 +188,16 @@ export component MainWindow inherits Window {
             update => { root.update-codex(); }
         }
 
+        if root.storage-status != "": Rectangle {
+            height: storage-label.preferred-height + 20px;
+            background: #392c19;
+            storage-label := Text {
+                x: 14px; y: 10px; width: parent.width - 28px;
+                text: root.storage-status + " • Open Settings for backup and recovery.";
+                color: #f1cf96; font-size: 12px; wrap: word-wrap;
+            }
+        }
+
         HorizontalLayout {
             visible: !root.startup-loading;
             spacing: 0px;

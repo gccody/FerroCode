@@ -2,7 +2,7 @@ use crate::AttachmentRow;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::mpsc,
 };
@@ -10,7 +10,7 @@ use std::{
 type DecodedPreview = (PathBuf, Option<(u32, u32, Vec<u8>)>);
 struct PreviewCache {
     images: HashMap<PathBuf, Image>,
-    order: VecDeque<PathBuf>,
+    scope: String,
     pending: HashSet<PathBuf>,
     jobs: mpsc::SyncSender<PathBuf>,
     completed: mpsc::Receiver<DecodedPreview>,
@@ -38,7 +38,7 @@ impl PreviewCache {
         });
         Self {
             images: HashMap::new(),
-            order: VecDeque::new(),
+            scope: String::new(),
             pending: HashSet::new(),
             jobs,
             completed,
@@ -46,13 +46,26 @@ impl PreviewCache {
     }
 }
 thread_local! { static PREVIEWS: RefCell<PreviewCache> = RefCell::new(PreviewCache::new()); }
+pub(super) fn set_preview_scope(scope: String) {
+    PREVIEWS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.scope != scope {
+            cache.scope = scope;
+            cache.images.clear();
+            cache.pending.clear();
+        }
+    });
+}
 fn preview(path: &Path) -> Image {
     PREVIEWS.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(image) = cache.images.get(path) {
             return image.clone();
         }
-        if !cache.pending.contains(path) && cache.jobs.try_send(path.to_owned()).is_ok() {
+        if cache.images.len() + cache.pending.len() < 128
+            && !cache.pending.contains(path)
+            && cache.jobs.try_send(path.to_owned()).is_ok()
+        {
             cache.pending.insert(path.to_owned());
         }
         Image::default()
@@ -64,7 +77,9 @@ pub(super) fn poll_previews() -> bool {
         let results = cache.completed.try_iter().collect::<Vec<_>>();
         let changed = !results.is_empty();
         for (path, pixels) in results {
-            cache.pending.remove(&path);
+            if !cache.pending.remove(&path) {
+                continue;
+            }
             let image = pixels
                 .map(|(width, height, bytes)| {
                     Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
@@ -72,12 +87,6 @@ pub(super) fn poll_previews() -> bool {
                     ))
                 })
                 .unwrap_or_default();
-            while cache.images.len() >= 128 {
-                if let Some(old) = cache.order.pop_front() {
-                    cache.images.remove(&old);
-                }
-            }
-            cache.order.push_back(path.clone());
             cache.images.insert(path, image);
         }
         changed
