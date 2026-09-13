@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashSet};
 
 pub(super) fn sync_ui(ui: &MainWindow, controller: &Controller, search: &str) {
     let state = &controller.state;
+    crate::attachments::set_preview_scope(state.draft_key());
     let draft = state.active_draft();
     if ui.get_draft_text().as_str() != draft.text {
         ui.set_draft_text(draft.text.into());

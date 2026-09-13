@@ -21,7 +21,7 @@ enum Completed {
     Attached(String, Vec<String>),
     Restored(Box<PersistedState>),
     Message(String),
-    Error(String, bool),
+    Error(String, bool, Option<String>),
 }
 
 pub(super) fn wire_services(
@@ -34,11 +34,15 @@ pub(super) fn wire_services(
 ) -> Timer {
     let (jobs, receiver) = mpsc::sync_channel::<Job>(8);
     let (results, completed) = mpsc::channel();
-    std::thread::Builder::new()
+    let worker = std::thread::Builder::new()
         .name("desktop-files".into())
         .spawn(move || {
             for job in receiver {
                 let restoring = matches!(&job, Job::Restore(_));
+                let attachment_key = match &job {
+                    Job::Attach(key, _) | Job::Paste(key, ..) => Some(key.clone()),
+                    _ => None,
+                };
                 let result: Result<Completed, String> = (|| match job {
                     Job::Attach(key, files) => {
                         let paths = files
@@ -53,26 +57,8 @@ pub(super) fn wire_services(
                         Ok(Completed::Attached(key, paths))
                     }
                     Job::Paste(key, width, height, pixels) => {
-                        let dir = store.attachments_dir();
-                        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-                        let path =
-                            dir.join(format!("{}.png", ferro_code_core::new_id("pasted-image")));
-                        image::save_buffer_with_format(
-                            &path,
-                            &pixels,
-                            width,
-                            height,
-                            image::ColorType::Rgba8,
-                            image::ImageFormat::Png,
-                        )
-                        .map_err(|e| e.to_string())?;
-                        std::fs::File::open(&path)
-                            .and_then(|file| file.sync_all())
-                            .map_err(|e| e.to_string())?;
-                        Ok(Completed::Attached(
-                            key,
-                            vec![path.to_string_lossy().into_owned()],
-                        ))
+                        let path = save_pasted_image(&store, width, height, &pixels)?;
+                        Ok(Completed::Attached(key, vec![path]))
                     }
                     Job::Export(state, path) => {
                         store.export(&state, &path).map_err(|e| e.to_string())?;
@@ -87,6 +73,9 @@ pub(super) fn wire_services(
                         Ok(Completed::Restored(Box::new(state)))
                     }
                     Job::Diagnostics(value, path) => {
+                        store
+                            .validate_export_target(&path)
+                            .map_err(|e| e.to_string())?;
                         let data = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
                         std::fs::write(&path, data).map_err(|e| e.to_string())?;
                         Ok(Completed::Message(format!(
@@ -96,14 +85,23 @@ pub(super) fn wire_services(
                     }
                 })();
                 if results
-                    .send(result.unwrap_or_else(|error| Completed::Error(error, restoring)))
+                    .send(
+                        result.unwrap_or_else(|error| {
+                            Completed::Error(error, restoring, attachment_key)
+                        }),
+                    )
                     .is_err()
                 {
                     break;
                 }
             }
-        })
-        .expect("start desktop file worker");
+        });
+    if let Err(error) = worker {
+        controller
+            .borrow_mut()
+            .state
+            .error(format!("Could not start file processing: {error}"));
+    }
 
     let control = controller.clone();
     let jobs_ref = jobs.clone();
@@ -113,12 +111,18 @@ pub(super) fn wire_services(
             .pick_files()
         {
             let key = control.borrow().state.draft_key();
-            if jobs_ref.try_send(Job::Attach(key, files)).is_err() {
+            if jobs_ref.try_send(Job::Attach(key.clone(), files)).is_err() {
                 control
                     .borrow_mut()
                     .state
                     .error("File processing is busy. Try attaching again.");
             } else {
+                *control
+                    .borrow_mut()
+                    .state
+                    .preparing_attachments
+                    .entry(key)
+                    .or_default() += 1;
                 control.borrow_mut().state.info("Preparing attachments…");
             }
         }
@@ -129,7 +133,7 @@ pub(super) fn wire_services(
         let key = control.borrow().state.draft_key();
         let files = clipboard_file_paths();
         let job = if !files.is_empty() {
-            Job::Attach(key, files)
+            Job::Attach(key.clone(), files)
         } else {
             let Some(image) = arboard::Clipboard::new()
                 .ok()
@@ -141,7 +145,7 @@ pub(super) fn wire_services(
             else {
                 return false;
             };
-            Job::Paste(key, width, height, image.bytes.into_owned())
+            Job::Paste(key.clone(), width, height, image.bytes.into_owned())
         };
         if jobs_ref.try_send(job).is_err() {
             control
@@ -149,6 +153,12 @@ pub(super) fn wire_services(
                 .state
                 .error("File processing is busy. Paste again after it finishes.");
         } else {
+            *control
+                .borrow_mut()
+                .state
+                .preparing_attachments
+                .entry(key)
+                .or_default() += 1;
             control.borrow_mut().state.info("Preparing attachment…");
         }
         true
@@ -259,6 +269,7 @@ pub(super) fn wire_services(
             let mut controller = control.borrow_mut();
             match result {
                 Completed::Attached(key, paths) => {
+                    finish_attachment(&mut controller, &key);
                     controller
                         .state
                         .drafts
@@ -283,7 +294,10 @@ pub(super) fn wire_services(
                         .info("History restored. Previous data was preserved.");
                 }
                 Completed::Message(message) => controller.state.info(message),
-                Completed::Error(error, restore) => {
+                Completed::Error(error, restore, attachment_key) => {
+                    if let Some(key) = attachment_key {
+                        finish_attachment(&mut controller, &key);
+                    }
                     if restore {
                         saving_enabled.set(previous_saving.get());
                         restoring.set(false);
@@ -300,4 +314,54 @@ pub(super) fn wire_services(
         }
     });
     timer
+}
+
+fn finish_attachment(controller: &mut Controller, key: &str) {
+    if let Some(count) = controller.state.preparing_attachments.get_mut(key) {
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            controller.state.preparing_attachments.remove(key);
+        }
+    }
+}
+
+fn save_pasted_image(
+    store: &LocalStore,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+) -> Result<String, String> {
+    let dir = store.attachments_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.png", ferro_code_core::new_id("pasted-image")));
+    image::save_buffer_with_format(
+        &path,
+        pixels,
+        width,
+        height,
+        image::ColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| e.to_string())?;
+    // FlushFileBuffers on Windows requires a handle opened for writing.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .and_then(|file| file.sync_all())
+        .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn pasted_pixels_are_synced_to_managed_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(dir.path().join("state.json"));
+        let pixels = [255, 0, 0, 255, 0, 255, 0, 255];
+        let path = save_pasted_image(&store, 2, 1, &pixels).unwrap();
+        assert!(std::path::Path::new(&path).starts_with(store.attachments_dir()));
+        assert_eq!(image::open(path).unwrap().to_rgba8().into_raw(), pixels);
+    }
 }

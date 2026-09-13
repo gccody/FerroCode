@@ -81,7 +81,35 @@ impl PersistenceWorker {
                 Duration::from_secs(30),
             )
             .map_err(|e| format!("History writer unavailable: {e}"))?;
-        rx.recv_timeout(Duration::from_secs(30))
-            .map_err(|e| format!("History save did not finish: {e}"))?
+        if restore {
+            // Restore runs on the file worker. Do not resume autosaving the old
+            // UI state while a slow restore could still complete on disk.
+            rx.recv()
+                .map_err(|e| format!("History writer stopped: {e}"))?
+        } else {
+            rx.recv_timeout(Duration::from_secs(30))
+                .map_err(|e| format!("History save did not finish: {e}"))?
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::LocalStore;
+    #[test]
+    fn paused_writer_requires_restore_then_serializes_subsequent_saves() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(dir.path().join("state.json"));
+        std::fs::write(store.path(), "broken").unwrap();
+        let writer = PersistenceWorker::start(store.open_session().unwrap(), false).unwrap();
+        assert!(writer.flush(PersistedState::default(), false).is_err());
+        assert_eq!(std::fs::read_to_string(store.path()).unwrap(), "broken");
+        let mut state = PersistedState::default();
+        state.preferences.model = "restored".into();
+        writer.flush(state.clone(), true).unwrap();
+        state.preferences.model = "latest".into();
+        writer.flush(state, false).unwrap();
+        assert_eq!(store.load().unwrap().preferences.model, "latest");
     }
 }

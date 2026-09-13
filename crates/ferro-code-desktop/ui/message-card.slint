@@ -14,6 +14,8 @@ export component MessageCard inherits Rectangle {
         ? max(48px, user-measure.preferred-height + 26px) + (message.attachments.length > 0 ? 82px : 0px)
         : message.activity && !message.collapsed && message.body != ""
         ? activity-body.preferred-height + 44px
+        : !message.activity && !message.activity-group-summary && !message.response-summary
+        ? markdown-content.preferred-height
         : message.row-height;
     // Keep a clear, consistent pause between each side of the conversation.
     height: self.content-height + 10px;
@@ -186,14 +188,27 @@ export component MessageCard inherits Rectangle {
         }
     }
 
-    if !message.user && !message.activity && !message.activity-group-summary && !message.response-summary: VerticalLayout {
+    markdown-content := VerticalLayout {
+        visible: !message.user && !message.activity && !message.activity-group-summary && !message.response-summary;
         width: parent.width; height: root.content-height;
         padding-left: 8px; padding-right: 8px; padding-top: 5px; padding-bottom: 5px;
         spacing: 7px;
 
         for block in message.markdown-blocks: Rectangle {
-            height: block.block-height;
+            height: block.kind == "table" || block.kind == "rule" ? block.block-height
+                : max(20px, block-measure.preferred-height)
+                    + (block.kind == "code" ? 42px : block.kind == "quote" ? 14px : 0px);
             background: transparent;
+            block-measure := Text {
+                visible: false;
+                width: max(1px, parent.width - (block.kind == "code" ? 20px : block.kind == "quote" ? 22px : 0px));
+                text: block.raw-text; wrap: word-wrap;
+                font-family: block.kind == "code" ? "Cascadia Mono" : "Segoe UI";
+                font-size: block.kind == "heading"
+                    ? (block.level == 1 ? 22px : block.level == 2 ? 19px : block.level == 3 ? 17px : block.level == 4 ? 15px : 14px)
+                    : block.kind == "code" || message.kind == "reasoning" ? 12px : 13px;
+                font-weight: block.kind == "heading" ? 600 : 400;
+            }
 
             if block.kind == "paragraph": TextInput {
                 width: parent.width; height: parent.height;
