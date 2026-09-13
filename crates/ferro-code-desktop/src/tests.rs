@@ -633,3 +633,16 @@ fn question_rows_retain_choices_and_secret_input_semantics() {
     assert_eq!(row.answer.as_str(), "Use saved");
     assert!(row.secret);
 }
+
+#[test]
+fn completed_thumbnail_refreshes_an_otherwise_unchanged_message() {
+    let mut item = ConversationItem::new("image-message", ItemKind::User, "User");
+    item.attachments.push("photo.png".into());
+    let rows = message_rows(&[item]);
+    let mut next = rows[0].clone();
+    let mut attachment = next.attachments.row_data(0).unwrap();
+    attachment.preview =
+        slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(1, 1));
+    next.attachments = model(vec![attachment]);
+    assert!(!message_rows_match(&rows[0], &next));
+}
