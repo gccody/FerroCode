@@ -125,7 +125,16 @@ impl AppState {
     }
 
     pub fn apply_history(&mut self, mut history: AppHistory) {
-        for thread in &mut history.threads {
+        for thread in history
+            .threads
+            .iter_mut()
+            .chain(history.archived_threads.iter_mut())
+        {
+            for item in &mut thread.messages {
+                if item.status == "running" {
+                    item.status = "interrupted".into();
+                }
+            }
             thread.agent.fill_missing_from(&self.prefs);
             if !thread.response_group_collapse_initialized {
                 initialize_response_collapse_state(&mut thread.messages);
@@ -361,6 +370,24 @@ impl AppState {
         self.activity_log.push("New conversation".into());
         self.touch();
         Some(id)
+    }
+
+    pub fn interrupt_items(&mut self, id: &str) {
+        let messages = if self.active_local_thread.as_deref() == Some(id) {
+            Some(&mut self.conversation)
+        } else {
+            self.threads
+                .iter_mut()
+                .find(|t| t.id == id)
+                .map(|t| &mut t.messages)
+        };
+        if let Some(messages) = messages {
+            for item in messages {
+                if item.status == "running" {
+                    item.status = "interrupted".into();
+                }
+            }
+        }
     }
 
     pub fn finish_turn(&mut self, id: &str, now_ms: u64) {
@@ -1150,6 +1177,43 @@ mod audit {
         assert_ne!(
             second, third,
             "A removed row allowed reuse of another thread's ID"
+        );
+    }
+}
+
+#[cfg(test)]
+mod continuity_tests {
+    use super::*;
+    #[test]
+    fn drafts_and_archives_survive_round_trip_and_undo() {
+        let mut state = AppState::from_persisted(PersistedState::default());
+        let project = state.add_project("first".into(), 1);
+        state.set_draft(ferro_code_core::Draft {
+            text: "project draft".into(),
+            attachments: vec![],
+        });
+        let thread = state.new_thread(2).unwrap();
+        state.set_draft(ferro_code_core::Draft {
+            text: "thread draft".into(),
+            attachments: vec!["file".into()],
+        });
+        state.add_project("second".into(), 3);
+        assert!(state.active_draft().text.is_empty());
+        assert!(state.archive_thread(&thread));
+        let mut restored = AppState::from_persisted(state.persisted());
+        restored.undo_archive();
+        assert_eq!(restored.active_project, Some(project));
+        assert_eq!(restored.active_local_thread, Some(thread));
+        assert_eq!(restored.active_draft().text, "thread draft");
+        assert_eq!(restored.active_draft().attachments, vec!["file"]);
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn case_distinct_project_paths_stay_distinct() {
+        let mut state = AppState::from_persisted(PersistedState::default());
+        assert_ne!(
+            state.add_project("/work/App".into(), 1),
+            state.add_project("/work/app".into(), 2)
         );
     }
 }

@@ -4,7 +4,7 @@ use ferro_code_core::{
     Approval, ContextWindowUsage, ConversationItem, ItemKind, PersistedState, PlanUsage,
     truncate_text,
 };
-use ferro_code_protocol::CodexBackend;
+use ferro_code_protocol::{CodexBackend, Transport};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
@@ -64,6 +64,7 @@ struct ActiveSummary {
     key: String,
     target: SummaryTarget,
     output: String,
+    deadline: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +80,7 @@ enum SummaryTarget {
 
 pub struct Controller {
     pub state: AppState,
-    backend: Option<CodexBackend>,
+    backend: Option<Box<dyn Transport>>,
     backend_start: Option<Receiver<Result<CodexBackend, String>>>,
     startup_in_progress: bool,
     workspace_rx: Option<Receiver<(Option<String>, workspace::WorkspaceSnapshot)>>,
@@ -128,6 +129,12 @@ impl Controller {
         }
     }
 
+    pub fn with_transport(persisted: PersistedState, transport: impl Transport + 'static) -> Self {
+        let mut controller = Self::new(persisted);
+        controller.backend = Some(Box::new(transport));
+        controller
+    }
+
     pub fn start(&mut self) {
         if self.backend_start.is_some() {
             return;
@@ -159,6 +166,15 @@ impl Controller {
             .is_some_and(|deadline| now >= deadline)
         {
             self.disconnect("Codex startup timed out. Use Reconnect to retry.");
+        }
+        if self
+            .active_summaries
+            .values()
+            .any(|summary| now >= summary.deadline)
+        {
+            self.disconnect(
+                "Codex summary timed out. Reconnect to retry; staged files were retained.",
+            );
         }
         let expired = self
             .deadlines
@@ -339,6 +355,7 @@ impl Controller {
         self.state.runtime_threads.clear();
         let running = self.state.running_turns.keys().cloned().collect::<Vec<_>>();
         for id in running {
+            self.state.interrupt_items(&id);
             self.state.finish_turn(&id, unix_timestamp_millis() as u64);
         }
         self.state.turn_started_at_ms.clear();
@@ -675,6 +692,13 @@ impl Controller {
             self.state.runtime_threads.get(local_id).cloned(),
             self.state.running_turns.get(local_id).cloned().flatten(),
         ) {
+            if self.pending.values().any(|call| {
+                matches!(call,
+                PendingCall::Interrupt { local_thread_id, turn_id: pending_turn }
+                if local_thread_id == local_id && pending_turn == &turn_id)
+            }) {
+                return;
+            }
             self.request(
                 "turn/interrupt",
                 json!({"threadId":thread_id,"turnId":turn_id}),
@@ -937,7 +961,7 @@ impl Controller {
         match result {
             Ok(backend) => {
                 let uses_cli_fallback = backend.uses_cli_fallback();
-                self.backend = Some(backend);
+                self.backend = Some(Box::new(backend));
                 if uses_cli_fallback {
                     self.check_for_codex_update();
                 }
@@ -1216,6 +1240,7 @@ impl Controller {
                 {
                     self.completed_turns
                         .insert((local_thread_id.clone(), turn_id));
+                    self.state.interrupt_items(&local_thread_id);
                     self.finish_local_turn(&local_thread_id);
                     self.state.activity_log.push("Turn interrupted".into());
                 }
@@ -1232,6 +1257,7 @@ impl Controller {
                             key: job.key,
                             target: job.target,
                             output: String::new(),
+                            deadline: Instant::now() + Duration::from_secs(180),
                         },
                     );
                     self.request(
@@ -1518,8 +1544,12 @@ impl Controller {
             "turn/completed" => {
                 if let Some(local_id) = self.local_thread_id(&params) {
                     if let Some(turn_id) = params.pointer("/turn/id").and_then(Value::as_str) {
-                        self.completed_turns
-                            .insert((local_id.clone(), turn_id.to_owned()));
+                        if !self
+                            .completed_turns
+                            .insert((local_id.clone(), turn_id.to_owned()))
+                        {
+                            return;
+                        }
                         if self
                             .state
                             .running_turns
@@ -2411,6 +2441,156 @@ mod audit_approval_target {
         assert!(
             c.state.approval.unwrap().detail.contains("project-a"),
             "Approval shows the foreground project instead of the requesting project"
+        );
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use std::{cell::RefCell, rc::Rc};
+    struct FakeTransport(Rc<RefCell<Vec<Value>>>);
+    impl Transport for FakeTransport {
+        fn send(&self, message: Value) -> Result<(), String> {
+            self.0.borrow_mut().push(message);
+            Ok(())
+        }
+        fn try_recv(&self) -> Option<Value> {
+            None
+        }
+    }
+    fn connected() -> (Controller, Rc<RefCell<Vec<Value>>>, String) {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let mut c =
+            Controller::with_transport(PersistedState::default(), FakeTransport(sent.clone()));
+        c.state.connected = true;
+        c.state.add_project("project".into(), 1);
+        let local = c.state.new_thread(2).unwrap();
+        // Avoid a title-summary request in tests of the interactive turn.
+        c.state
+            .conversation
+            .push(ConversationItem::new("previous", ItemKind::User, "User"));
+        (c, sent, local)
+    }
+    fn request(sent: &Rc<RefCell<Vec<Value>>>, method: &str) -> Value {
+        sent.borrow()
+            .iter()
+            .rev()
+            .find(|v| v["method"] == method)
+            .unwrap()
+            .clone()
+    }
+    #[test]
+    fn stop_before_thread_start_prevents_turn_request() {
+        let (mut c, sent, _) = connected();
+        assert!(c.send_prompt("hello".into(), vec![]));
+        c.interrupt();
+        let start = request(&sent, "thread/start");
+        c.handle_message(json!({"id":start["id"],"result":{"thread":{"id":"runtime"}}}));
+        assert!(!c.state.active_thread_busy());
+        assert!(!sent.borrow().iter().any(|v| v["method"] == "turn/start"));
+    }
+    #[test]
+    fn stop_during_turn_start_interrupts_once_id_arrives() {
+        let (mut c, sent, local) = connected();
+        c.state.runtime_threads.insert(local, "runtime".into());
+        c.send_prompt("hello".into(), vec![]);
+        let start = request(&sent, "turn/start");
+        assert_eq!(start["params"]["sandboxPolicy"]["type"], "workspaceWrite");
+        c.interrupt();
+        c.handle_notification(
+            "turn/started",
+            json!({"threadId":"runtime","turn":{"id":"turn"}}),
+        );
+        c.handle_message(json!({"id":start["id"],"result":{"turn":{"id":"turn"}}}));
+        assert_eq!(
+            sent.borrow()
+                .iter()
+                .filter(|v| v["method"] == "turn/interrupt")
+                .count(),
+            1
+        );
+        assert_eq!(request(&sent, "turn/interrupt")["params"]["turnId"], "turn");
+    }
+    #[test]
+    fn completed_turn_and_stale_interrupt_cannot_finish_next_turn() {
+        let (mut c, sent, local) = connected();
+        c.state
+            .runtime_threads
+            .insert(local.clone(), "runtime".into());
+        c.send_prompt("first".into(), vec![]);
+        let first = request(&sent, "turn/start");
+        c.handle_notification(
+            "turn/completed",
+            json!({"threadId":"runtime","turn":{"id":"old"}}),
+        );
+        c.handle_message(json!({"id":first["id"],"result":{"turn":{"id":"old"}}}));
+        assert!(!c.state.active_thread_busy());
+        c.send_prompt("second".into(), vec![]);
+        c.handle_notification(
+            "turn/completed",
+            json!({"threadId":"runtime","turn":{"id":"old"}}),
+        );
+        assert!(c.state.active_thread_busy());
+        let second = request(&sent, "turn/start");
+        c.handle_message(json!({"id":second["id"],"result":{"turn":{"id":"new"}}}));
+        c.handle_response(
+            PendingCall::Interrupt {
+                local_thread_id: local,
+                turn_id: "old".into(),
+            },
+            json!({}),
+        );
+        assert!(c.state.active_thread_busy());
+    }
+    #[test]
+    fn disconnect_clears_runtime_queues_and_marks_partial_items_interrupted() {
+        let (mut c, _, local) = connected();
+        c.state.runtime_threads.insert(local, "runtime".into());
+        c.send_prompt("hello".into(), vec![]);
+        c.state
+            .conversation
+            .push(ConversationItem::new("command", ItemKind::Command, "work"));
+        c.state.usage_loading = true;
+        c.handle_server_request(json!({"id":"approval","method":"item/fileChange/requestApproval","params":{"threadId":"runtime"}}));
+        c.handle_notification("backend/exited", json!({"message":"EOF"}));
+        assert!(!c.state.connected);
+        assert!(c.pending.is_empty());
+        assert!(c.state.runtime_threads.is_empty());
+        assert!(c.state.running_turns.is_empty());
+        assert!(c.state.approval.is_none());
+        assert!(!c.state.usage_loading);
+        assert_eq!(c.state.conversation.last().unwrap().status, "interrupted");
+    }
+    #[test]
+    fn expired_start_request_disconnects_instead_of_allowing_overlapping_retry() {
+        let (mut c, _, _) = connected();
+        c.send_prompt("hello".into(), vec![]);
+        for deadline in c.deadlines.values_mut() {
+            *deadline = Instant::now();
+        }
+        c.poll();
+        assert!(!c.state.connected);
+        assert!(!c.state.active_thread_busy());
+    }
+    #[test]
+    fn restored_attachment_is_included_in_new_runtime_turn() {
+        let (mut c, sent, _) = connected();
+        let path = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        c.state.conversation[0].attachments.push(path.clone());
+        c.send_prompt("use that file".into(), vec![]);
+        let start = request(&sent, "thread/start");
+        c.handle_message(json!({"id":start["id"],"result":{"thread":{"id":"runtime"}}}));
+        let turn = request(&sent, "turn/start");
+        assert!(
+            turn["params"]["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v.to_string().contains(&path.replace('\\', "\\\\")))
         );
     }
 }

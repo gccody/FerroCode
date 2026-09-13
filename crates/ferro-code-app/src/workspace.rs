@@ -158,15 +158,20 @@ pub(crate) fn commit_context(root: &str) -> Result<CommitSnapshot, String> {
     run_command("git", &["-C", root, "add", "--all", "--", "."])?;
     let tree = run_command("git", &["-C", root, "write-tree"])?;
     let head = command_stdout("git", &["-C", root, "rev-parse", "--verify", "HEAD"]);
+    let base = match &head {
+        Some(head) => head.clone(),
+        None => run_command("git", &["-C", root, "mktree"])?,
+    };
     let diff = run_command(
         "git",
         &[
             "-C",
             root,
             "diff",
-            "--cached",
             "--no-ext-diff",
             "--stat",
+            &base,
+            &tree,
             "--",
         ],
     )?;
@@ -176,8 +181,9 @@ pub(crate) fn commit_context(root: &str) -> Result<CommitSnapshot, String> {
             "-C",
             root,
             "diff",
-            "--cached",
             "--no-ext-diff",
+            &base,
+            &tree,
             "--",
             ":(exclude)Cargo.lock",
         ],
@@ -555,6 +561,67 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn subfolder_commit_is_rejected_without_staging_siblings() {
+        let root = temp_workspace("scope");
+        fs::create_dir_all(root.join("child")).unwrap();
+        let text = root.to_str().unwrap();
+        run_command("git", &["init", "--quiet", text]).unwrap();
+        fs::write(root.join("sibling.txt"), "must remain unstaged").unwrap();
+        assert!(
+            commit_context(root.join("child").to_str().unwrap())
+                .unwrap_err()
+                .contains("repository root")
+        );
+        assert!(
+            run_command("git", &["-C", text, "ls-files"])
+                .unwrap()
+                .is_empty()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn commit_summary_matches_staged_new_files_and_detects_index_changes() {
+        let root = temp_workspace("snapshot");
+        fs::create_dir_all(&root).unwrap();
+        let text = root.to_str().unwrap();
+        run_command("git", &["init", "--quiet", text]).unwrap();
+        run_command("git", &["-C", text, "config", "user.name", "Ferro Test"]).unwrap();
+        run_command(
+            "git",
+            &["-C", text, "config", "user.email", "ferro@example.test"],
+        )
+        .unwrap();
+        fs::write(root.join("new.txt"), "snapshot contents").unwrap();
+        let snapshot = commit_context(text).unwrap();
+        assert!(snapshot.context.contains("+snapshot contents"));
+        fs::write(root.join("new.txt"), "later edits").unwrap();
+        commit_snapshot(text, "Save snapshot", &snapshot).unwrap();
+        assert_eq!(
+            run_command("git", &["-C", text, "show", "HEAD:new.txt"]).unwrap(),
+            "snapshot contents"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("new.txt")).unwrap(),
+            "later edits"
+        );
+        let snapshot = commit_context(text).unwrap();
+        fs::write(root.join("new.txt"), "externally staged edits").unwrap();
+        run_command("git", &["-C", text, "add", "."]).unwrap();
+        assert!(commit_snapshot(text, "Must not commit", &snapshot).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn nul_status_preserves_unicode_spaces_newlines_and_rename_sources() {
+        let changes = parse_status(
+            "?? café file.txt\0R  new -> name\0old name\0 M line\nbreak.txt\0".as_bytes(),
+        );
+        assert_eq!(changes.len(), 3);
+        assert_eq!(changes[0].path, "café file.txt");
+        assert_eq!(changes[1].path, "new -> name");
+        assert_eq!(changes[1].original_path.as_deref(), Some("old name"));
+        assert_eq!(changes[2].path, "line\nbreak.txt");
+    }
     #[test]
     fn github_remote_urls_are_normalized_to_https() {
         for remote in [
