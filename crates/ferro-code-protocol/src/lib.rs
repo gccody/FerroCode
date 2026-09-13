@@ -46,6 +46,35 @@ pub fn encode_message(message: &Value) -> Result<Vec<u8>, serde_json::Error> {
     Ok(bytes)
 }
 
+/// Construct and validate turn overrides using the pinned protocol types.
+pub fn turn_params(mut params: Value) -> Result<Value, String> {
+    use codex_app_server_protocol::{SandboxPolicy, TurnStartParams};
+    let mode = params.as_object_mut().and_then(|p| p.remove("sandbox"));
+    for key in ["model", "effort"] {
+        if params.get(key).and_then(Value::as_str) == Some("") {
+            params.as_object_mut().unwrap().remove(key);
+        }
+    }
+    let mut typed: TurnStartParams =
+        serde_json::from_value(params).map_err(|e| format!("Invalid turn: {e}"))?;
+    if let Some(mode) = mode {
+        typed.sandbox_policy = Some(match mode.as_str() {
+            Some("read-only") => SandboxPolicy::ReadOnly {
+                network_access: false,
+            },
+            Some("workspace-write") => SandboxPolicy::WorkspaceWrite {
+                writable_roots: Vec::new(),
+                network_access: false,
+                exclude_tmpdir_env_var: true,
+                exclude_slash_tmp: true,
+            },
+            Some("danger-full-access") => SandboxPolicy::DangerFullAccess,
+            _ => return Err("Unknown sandbox mode".into()),
+        });
+    }
+    serde_json::to_value(typed).map_err(|e| e.to_string())
+}
+
 pub struct CodexBackend {
     outgoing: Sender<Value>,
     incoming: Receiver<Value>,
@@ -125,6 +154,7 @@ impl CodexBackend {
                     }
                 }
             }
+            let _ = reader_tx.send(json!({"method":"backend/exited","params":{"message":"Codex output closed"}}));
         }).map_err(|error| error.to_string())?;
 
         thread::Builder::new()
@@ -156,7 +186,13 @@ impl CodexBackend {
     }
 
     pub fn try_recv(&self) -> Option<Value> {
-        self.incoming.try_recv().ok()
+        match self.incoming.try_recv() {
+            Ok(message) => Some(message),
+            Err(crossbeam_channel::TryRecvError::Empty) => None,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => Some(
+                json!({"method":"backend/exited","params":{"message":"Codex transport disconnected"}}),
+            ),
+        }
     }
 }
 
@@ -274,8 +310,13 @@ async fn handle_sdk_message(
 
     if method.is_some() && message.get("id").is_some() {
         let id = message.get("id").cloned().unwrap_or(Value::Null);
-        let request = serde_json::from_value::<ClientRequest>(message)
-            .map_err(|error| format!("Codex SDK does not support this request: {error}"))?;
+        let request = match serde_json::from_value::<ClientRequest>(message) {
+            Ok(request) => request,
+            Err(error) => {
+                let _ = incoming.send(json!({"id":id,"error":{"code":-32602,"message":format!("Unsupported request: {error}")}}));
+                return Ok(());
+            }
+        };
         let request_handle = client.request_handle();
         let incoming = incoming.clone();
         tokio::spawn(async move {
@@ -413,5 +454,35 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         panic!("timed out waiting for Codex response {expected}");
+    }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+    #[test]
+    fn turn_sandbox_overrides_survive_typed_round_trip() {
+        for (mode, expected) in [
+            ("read-only", "readOnly"),
+            ("workspace-write", "workspaceWrite"),
+            ("danger-full-access", "dangerFullAccess"),
+        ] {
+            let params = turn_params(json!({"threadId":"t", "input":[], "sandbox":mode})).unwrap();
+            assert_eq!(params["sandboxPolicy"]["type"], expected);
+            assert!(params.get("sandbox").is_none());
+        }
+    }
+    #[test]
+    fn closed_transport_reports_exit() {
+        let (tx, rx) = unbounded();
+        drop(tx);
+        let (outgoing, _) = unbounded();
+        let backend = CodexBackend {
+            outgoing,
+            incoming: rx,
+            child: Arc::new(Mutex::new(None)),
+            uses_cli_fallback: false,
+        };
+        assert_eq!(backend.try_recv().unwrap()["method"], "backend/exited");
     }
 }

@@ -5610,8 +5610,11 @@ dependencies = [
 name = "ferro-code-core"
 version = "0.2.0"
 dependencies = [
+ "crossbeam-channel",
  "serde",
  "serde_json",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

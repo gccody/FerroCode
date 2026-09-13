@@ -1,6 +1,7 @@
 use crate::PersistedState;
 use std::{
     fmt, fs, io,
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -55,13 +56,13 @@ impl LocalStore {
     }
     pub fn load(&self) -> Result<PersistedState, StoreError> {
         match fs::read(&self.path) {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Ok(bytes) => decode_snapshot(&bytes),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let Some(legacy_path) = &self.legacy_path else {
                     return Ok(PersistedState::default());
                 };
                 match fs::read(legacy_path) {
-                    Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+                    Ok(bytes) => decode_snapshot(&bytes),
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
                         Ok(PersistedState::default())
                     }
@@ -72,17 +73,218 @@ impl LocalStore {
         }
     }
     pub fn save(&self, state: &PersistedState) -> Result<(), StoreError> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
+        self.open_session()?.save(state)
+    }
+
+    /// A lifetime lock prevents two windows from overwriting each other's state.
+    pub fn open_session(&self) -> Result<StoreSession, StoreError> {
+        let parent = self.path.parent().unwrap_or(Path::new("."));
+        fs::create_dir_all(parent)?;
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.path.with_extension("lock"))?;
+        lock.try_lock().map_err(|error| {
+            io::Error::other(format!(
+                "Local history is already open in another Ferro Code window: {error}"
+            ))
+        })?;
+        Ok(StoreSession {
+            store: self.clone(),
+            _lock: lock,
+        })
+    }
+
+    pub fn attachments_dir(&self) -> PathBuf {
+        self.path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("attachments")
+    }
+
+    pub fn import_attachment(&self, source: &Path) -> Result<PathBuf, StoreError> {
+        let directory = self.attachments_dir();
+        fs::create_dir_all(&directory)?;
+        if source.canonicalize().ok().is_some_and(|p| {
+            directory
+                .canonicalize()
+                .ok()
+                .is_some_and(|dir| p.starts_with(dir))
+        }) {
+            return Ok(source.to_owned());
         }
-        let temporary = self.path.with_extension("json.tmp");
-        fs::write(&temporary, serde_json::to_vec_pretty(state)?)?;
-        if self.path.exists() {
-            fs::remove_file(&self.path)?;
+        let filename = source
+            .file_name()
+            .ok_or_else(|| io::Error::other("Attachment has no filename"))?
+            .to_string_lossy();
+        let target = directory.join(format!("{}-{filename}", crate::new_id("file")));
+        let mut input = fs::File::open(source)?;
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)?;
+        io::copy(&mut input, &mut output)?;
+        output.sync_all()?;
+        Ok(target)
+    }
+
+    pub fn export(&self, state: &PersistedState, target: &Path) -> Result<(), StoreError> {
+        // Export is portable: all referenced files accompany the JSON snapshot.
+        let export_store = LocalStore::new(
+            target
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join(format!(
+                    "{}.files",
+                    target.file_stem().unwrap_or_default().to_string_lossy()
+                ))
+                .join("state.json"),
+        );
+        let mut state = state.clone();
+        remap_attachments(&mut state, |path| {
+            export_store
+                .import_attachment(Path::new(path))
+                .map(|p| p.to_string_lossy().into_owned())
+        })?;
+        atomic_write(target, &encode_snapshot(&state)?)
+    }
+
+    pub fn import(&self, source: &Path) -> Result<PersistedState, StoreError> {
+        let mut state = decode_snapshot(&fs::read(source)?)?;
+        remap_attachments(&mut state, |path| {
+            self.import_attachment(Path::new(path))
+                .map(|p| p.to_string_lossy().into_owned())
+        })?;
+        Ok(state)
+    }
+}
+
+/// A transaction is a synced snapshot atomically replacing the previous one.
+/// The previous validated generation remains available for recovery.
+pub struct StoreSession {
+    store: LocalStore,
+    _lock: fs::File,
+}
+impl StoreSession {
+    pub fn load(&self) -> Result<(PersistedState, Option<String>), StoreError> {
+        match self.store.load() {
+            Ok(state)
+                if self.store.path.exists()
+                    || !self.store.path.with_extension("json.bak").exists() =>
+            {
+                Ok((state, None))
+            }
+            result => {
+                let backup = self.store.path.with_extension("json.bak");
+                let restored = fs::read(&backup)
+                    .map_err(StoreError::from)
+                    .and_then(|bytes| decode_snapshot(&bytes));
+                match restored {
+                    Ok(state) => {
+                        self.preserve_current()?;
+                        atomic_write(&self.store.path, &encode_snapshot(&state)?)?;
+                        Ok((state, Some("Recovered local history from the previous saved generation. The damaged file was preserved.".into())))
+                    }
+                    Err(_) => result.map(|state| (state, None)),
+                }
+            }
         }
-        fs::rename(temporary, &self.path)?;
+    }
+    fn preserve_current(&self) -> Result<(), StoreError> {
+        if self.store.path.exists() {
+            let preserved = self
+                .store
+                .path
+                .with_extension(format!("{}.json", crate::new_id("preserved")));
+            fs::copy(&self.store.path, preserved)?;
+        }
         Ok(())
     }
+    pub fn restore(&self, state: &PersistedState) -> Result<(), StoreError> {
+        self.preserve_current()?;
+        atomic_write(&self.store.path, &encode_snapshot(state)?)
+    }
+    pub fn save(&self, state: &PersistedState) -> Result<(), StoreError> {
+        if self.store.path.exists() {
+            let previous = fs::read(&self.store.path)?;
+            decode_snapshot(&previous)?; // Never replace unreadable history with defaults.
+            atomic_write(&self.store.path.with_extension("json.bak"), &previous)?;
+        }
+        atomic_write(&self.store.path, &encode_snapshot(state)?)
+    }
+}
+
+fn encode_snapshot(state: &PersistedState) -> Result<Vec<u8>, StoreError> {
+    Ok(serde_json::to_vec_pretty(
+        &serde_json::json!({"schema_version":1, "state":state}),
+    )?)
+}
+fn decode_snapshot(bytes: &[u8]) -> Result<PersistedState, StoreError> {
+    let value: serde_json::Value = serde_json::from_slice(bytes)?;
+    let state = if let Some(version) = value.get("schema_version") {
+        if version.as_u64() != Some(1) {
+            return Err(io::Error::other(
+                "Unsupported history schema; use a compatible Ferro Code version",
+            )
+            .into());
+        }
+        value
+            .get("state")
+            .cloned()
+            .ok_or_else(|| io::Error::other("Missing history snapshot"))?
+    } else {
+        value
+    };
+    if !state.is_object() || (state.get("history").is_none() && state.get("preferences").is_none())
+    {
+        return Err(io::Error::other("This file is not a Ferro Code history snapshot").into());
+    }
+    Ok(serde_json::from_value(state)?)
+}
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+    staged.write_all(bytes)?;
+    staged.as_file().sync_all()?;
+    staged.persist(path).map_err(|error| error.error)?;
+    #[cfg(unix)]
+    fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+fn remap_attachments(
+    state: &mut PersistedState,
+    mut copy: impl FnMut(&str) -> Result<String, StoreError>,
+) -> Result<(), StoreError> {
+    let mut paths = std::collections::HashMap::<String, String>::new();
+    let all = state
+        .history
+        .threads
+        .iter_mut()
+        .chain(state.history.archived_threads.iter_mut())
+        .flat_map(|thread| thread.messages.iter_mut())
+        .flat_map(|message| message.attachments.iter_mut())
+        .chain(
+            state
+                .history
+                .drafts
+                .values_mut()
+                .flat_map(|draft| draft.attachments.iter_mut()),
+        );
+    for path in all {
+        let replacement = if let Some(replacement) = paths.get(path) {
+            replacement.clone()
+        } else {
+            let replacement = copy(path)?;
+            paths.insert(path.clone(), replacement.clone());
+            replacement
+        };
+        *path = replacement;
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -203,5 +405,73 @@ mod tests {
         store.save(&restored).unwrap();
         assert!(path.exists());
         let _ = fs::remove_dir_all(base);
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    #[test]
+    fn invalid_primary_recovers_backup_and_preserves_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(dir.path().join("state.json"));
+        let mut state = PersistedState::default();
+        state.preferences.model = "first".into();
+        store.save(&state).unwrap();
+        state.preferences.model = "second".into();
+        store.save(&state).unwrap();
+        fs::write(store.path(), b"broken").unwrap();
+        let session = store.open_session().unwrap();
+        let (state, warning) = session.load().unwrap();
+        assert_eq!(state.preferences.model, "first");
+        assert!(warning.is_some());
+        assert!(
+            fs::read_dir(dir.path())
+                .unwrap()
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().contains("preserved"))
+        );
+    }
+    #[test]
+    fn invalid_primary_without_backup_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(dir.path().join("state.json"));
+        fs::write(store.path(), b"broken").unwrap();
+        assert!(store.save(&PersistedState::default()).is_err());
+        assert_eq!(fs::read(store.path()).unwrap(), b"broken");
+    }
+    #[test]
+    fn only_one_writer_can_open_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(dir.path().join("state.json"));
+        let session = store.open_session().unwrap();
+        assert!(store.open_session().is_err());
+        drop(session);
+        assert!(store.open_session().is_ok());
+    }
+    #[test]
+    fn attachments_survive_source_removal_and_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.txt");
+        fs::write(&source, b"contents").unwrap();
+        let store = LocalStore::new(dir.path().join("app/state.json"));
+        let imported = store.import_attachment(&source).unwrap();
+        fs::remove_file(source).unwrap();
+        assert_eq!(fs::read(imported).unwrap(), b"contents");
+        let export = dir.path().join("export.json");
+        store.export(&PersistedState::default(), &export).unwrap();
+        assert!(store.import(&export).is_ok());
+    }
+    #[test]
+    fn failed_atomic_replace_keeps_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("directory");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("sentinel"), "safe").unwrap();
+        assert!(atomic_write(&destination, b"replacement").is_err());
+        assert_eq!(
+            fs::read_to_string(destination.join("sentinel")).unwrap(),
+            "safe"
+        );
     }
 }

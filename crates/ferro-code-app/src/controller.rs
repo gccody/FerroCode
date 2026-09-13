@@ -10,7 +10,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Clone)]
@@ -26,9 +26,11 @@ enum PendingCall {
     },
     TurnStart {
         local_thread_id: String,
+        generation: u64,
     },
     Interrupt {
         local_thread_id: String,
+        turn_id: String,
     },
     SummaryThreadStart(SummaryJob),
     SummaryTurnStart {
@@ -38,6 +40,7 @@ enum PendingCall {
 
 #[derive(Debug, Clone)]
 struct PendingTurn {
+    generation: u64,
     input: Vec<Value>,
     cwd: String,
     approval_policy: String,
@@ -84,6 +87,12 @@ pub struct Controller {
     summary_pending: HashSet<String>,
     active_summaries: HashMap<String, ActiveSummary>,
     next_id: u64,
+    last_polled_revision: u64,
+    turn_generations: HashMap<String, u64>,
+    cancelled: HashSet<String>,
+    completed_turns: HashSet<(String, String)>,
+    deadlines: HashMap<u64, Instant>,
+    startup_deadline: Option<Instant>,
 }
 
 impl Controller {
@@ -103,6 +112,12 @@ impl Controller {
             summary_pending: HashSet::new(),
             active_summaries: HashMap::new(),
             next_id: 1,
+            last_polled_revision: 0,
+            turn_generations: HashMap::new(),
+            cancelled: HashSet::new(),
+            completed_turns: HashSet::new(),
+            deadlines: HashMap::new(),
+            startup_deadline: None,
         }
     }
 
@@ -110,26 +125,57 @@ impl Controller {
         if self.backend_start.is_some() {
             return;
         }
-        self.backend = None;
-        self.pending.clear();
-        self.summary_pending.clear();
-        self.active_summaries.clear();
+        self.clear_backend_state();
+        self.startup_deadline = Some(Instant::now() + Duration::from_secs(60));
         self.startup_in_progress = true;
         self.state.connected = false;
         self.state.connection_text = "Starting Codex…".into();
         let (tx, rx) = unbounded();
         self.backend_start = Some(rx);
-        let _ = thread::Builder::new()
+        if let Err(error) = thread::Builder::new()
             .name("codex-startup".into())
             .spawn(move || {
                 let _ = tx.send(CodexBackend::spawn());
-            });
+            })
+        {
+            self.disconnect(&format!("Could not start Codex: {error}"));
+        }
         self.state.touch();
         self.refresh_workspace();
     }
 
     pub fn poll(&mut self) -> bool {
-        let previous = self.state.revision;
+        let previous = self.last_polled_revision;
+        let now = Instant::now();
+        if self
+            .startup_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.disconnect("Codex startup timed out. Use Reconnect to retry.");
+        }
+        let expired = self
+            .deadlines
+            .iter()
+            .filter_map(|(id, deadline)| (now >= *deadline).then_some(*id))
+            .collect::<Vec<_>>();
+        for id in expired {
+            // A timed-out start may still be executing remotely. Reconnect ends this
+            // generation instead of enabling another turn over uncertain work.
+            if matches!(
+                self.pending.get(&id),
+                Some(
+                    PendingCall::ThreadStart { .. }
+                        | PendingCall::TurnStart { .. }
+                        | PendingCall::Interrupt { .. }
+                        | PendingCall::SummaryThreadStart(_)
+                        | PendingCall::SummaryTurnStart { .. }
+                )
+            ) {
+                self.disconnect("Codex request timed out. Reconnect before retrying the task.");
+                break;
+            }
+            self.handle_message(json!({"id":id,"error":{"message":"Codex request timed out"}}));
+        }
         if let Some(result) = self
             .backend_start
             .as_ref()
@@ -159,11 +205,7 @@ impl Controller {
                     .insert(workspace_cache_key(root), snapshot.clone());
             }
             let active_root = self.state.active_project_path();
-            let result_is_active = match (root.as_deref(), active_root) {
-                (Some(result), Some(active)) => result.eq_ignore_ascii_case(active),
-                (None, None) => true,
-                _ => false,
-            };
+            let result_is_active = same_workspace(root.as_deref(), active_root);
             if result_is_active {
                 self.apply_workspace_snapshot(snapshot);
             }
@@ -227,6 +269,11 @@ impl Controller {
                 Err(error) => self.state.error(error),
             }
         }
+        if self.state.activity_log.len() > 1000 {
+            let excess = self.state.activity_log.len() - 1000;
+            self.state.activity_log.drain(..excess);
+        }
+        self.last_polled_revision = self.state.revision;
         previous != self.state.revision
     }
 
@@ -249,7 +296,79 @@ impl Controller {
             })
         {
             self.startup_in_progress = false;
+            self.startup_deadline = None;
         }
+    }
+
+    fn clear_backend_state(&mut self) {
+        self.backend = None;
+        self.backend_start = None;
+        self.pending.clear();
+        self.deadlines.clear();
+        self.startup_deadline = None;
+        self.turn_generations.clear();
+        self.cancelled.clear();
+        self.completed_turns.clear();
+        self.state.runtime_threads.clear();
+        let running = self.state.running_turns.keys().cloned().collect::<Vec<_>>();
+        for id in running {
+            self.state.finish_turn(&id, unix_timestamp_millis() as u64);
+        }
+        self.state.turn_started_at_ms.clear();
+        self.state.approval = None;
+        self.state.approval_queue.clear();
+        self.state.user_question = None;
+        self.state.user_question_queue.clear();
+        self.state.usage_loading = false;
+        self.state.reset_in_progress = false;
+        if self.git_action_rx.is_none() {
+            self.state.git_action_in_progress = false;
+        }
+        self.summary_pending.clear();
+        self.active_summaries.clear();
+    }
+
+    fn disconnect(&mut self, message: &str) {
+        self.clear_backend_state();
+        self.startup_in_progress = false;
+        self.state.connected = false;
+        self.state.connection_text = "Codex disconnected — Reconnect to retry".into();
+        self.state.error(message);
+    }
+
+    fn finish_local_turn(&mut self, id: &str) {
+        self.turn_generations.remove(id);
+        self.cancelled.remove(id);
+        if self
+            .state
+            .approval
+            .as_ref()
+            .is_some_and(|a| a.local_thread_id.as_deref() == Some(id))
+        {
+            self.state.approval = None;
+        }
+        self.state
+            .approval_queue
+            .retain(|a| a.local_thread_id.as_deref() != Some(id));
+        if self.state.approval.is_none() {
+            self.state.approval = self.state.approval_queue.pop_front();
+        }
+        if self
+            .state
+            .user_question
+            .as_ref()
+            .is_some_and(|q| q.local_thread_id.as_deref() == Some(id))
+        {
+            self.state.user_question = None;
+        }
+        self.state
+            .user_question_queue
+            .retain(|q| q.local_thread_id.as_deref() != Some(id));
+        if self.state.user_question.is_none() {
+            self.state.user_question = self.state.user_question_queue.pop_front();
+        }
+        self.state.finish_turn(id, unix_timestamp_millis() as u64);
+        self.state.touch();
     }
 
     fn check_for_codex_update(&mut self) {
@@ -407,6 +526,10 @@ impl Controller {
         self.state
             .begin_turn(local_thread_id.clone(), unix_timestamp_millis() as u64);
         self.state.touch();
+        let generation = self.next_id;
+        self.turn_generations
+            .insert(local_thread_id.clone(), generation);
+        self.cancelled.remove(&local_thread_id);
         if first_prompt {
             self.start_title_summary(&local_thread_id, &text);
         }
@@ -424,6 +547,7 @@ impl Controller {
         input.extend(attachments.into_iter().map(attachment_input));
         let agent = self.state.active_agent();
         let turn = PendingTurn {
+            generation,
             input,
             cwd: self.state.prefs.workspace.clone(),
             approval_policy: agent
@@ -461,15 +585,24 @@ impl Controller {
         let Some(local_id) = self.state.active_local_thread.clone() else {
             return;
         };
+        if !self.state.running_turns.contains_key(&local_id) {
+            return;
+        }
+        self.cancelled.insert(local_id.clone());
+        self.interrupt_when_ready(&local_id);
+    }
+
+    fn interrupt_when_ready(&mut self, local_id: &str) {
         if let (Some(thread_id), Some(turn_id)) = (
-            self.state.runtime_threads.get(&local_id).cloned(),
-            self.state.running_turns.get(&local_id).cloned().flatten(),
+            self.state.runtime_threads.get(local_id).cloned(),
+            self.state.running_turns.get(local_id).cloned().flatten(),
         ) {
             self.request(
                 "turn/interrupt",
                 json!({"threadId":thread_id,"turnId":turn_id}),
                 PendingCall::Interrupt {
-                    local_thread_id: local_id,
+                    local_thread_id: local_id.to_owned(),
+                    turn_id,
                 },
             );
         }
@@ -530,7 +663,7 @@ impl Controller {
     }
 
     pub fn refresh_plan_usage(&mut self) {
-        if !self.state.connected || !self.state.account.authenticated {
+        if !self.state.connected || !self.state.account.authenticated || self.state.usage_loading {
             return;
         }
         self.state.usage_loading = true;
@@ -543,7 +676,7 @@ impl Controller {
     }
 
     pub fn consume_reset(&mut self) {
-        if self.state.reset_in_progress {
+        if self.state.reset_in_progress || !self.state.connected {
             return;
         }
         self.state.reset_in_progress = true;
@@ -732,13 +865,22 @@ impl Controller {
     fn request(&mut self, method: &str, params: Value, kind: PendingCall) {
         let id = self.next_id;
         self.next_id += 1;
-        if let Some(backend) = &self.backend {
-            match backend.send(json!({"method":method,"id":id,"params":params})) {
-                Ok(()) => {
-                    self.pending.insert(id, kind);
-                }
-                Err(error) => self.state.error(error),
-            }
+        self.pending.insert(id, kind);
+        self.deadlines
+            .insert(id, Instant::now() + Duration::from_secs(60));
+        let params = if method == "turn/start" {
+            ferro_code_protocol::turn_params(params)
+        } else {
+            Ok(params)
+        };
+        let result = params.and_then(|params| {
+            self.backend
+                .as_ref()
+                .ok_or_else(|| "Codex is disconnected".to_owned())?
+                .send(json!({"method":method,"id":id,"params":params}))
+        });
+        if let Err(error) = result {
+            self.handle_message(json!({"id":id,"error":{"message":error}}));
         }
     }
 
@@ -759,11 +901,12 @@ impl Controller {
     }
 
     fn handle_message(&mut self, message: Value) {
+        if message.get("id").is_some() && message.get("method").is_some() {
+            self.handle_server_request(message);
+            return;
+        }
         if let Some(id) = message.get("id").and_then(Value::as_u64) {
-            if message.get("method").is_some() {
-                self.handle_server_request(message);
-                return;
-            }
+            self.deadlines.remove(&id);
             let pending = self.pending.remove(&id);
             if let Some(error) = message.get("error") {
                 let text = error
@@ -777,10 +920,19 @@ impl Controller {
                         PendingCall::ThreadStart {
                             local_thread_id, ..
                         }
-                        | PendingCall::TurnStart { local_thread_id },
+                        | PendingCall::TurnStart {
+                            local_thread_id, ..
+                        },
                     ) => {
-                        self.state
-                            .finish_turn(local_thread_id, unix_timestamp_millis() as u64);
+                        // Only the matching generation can finish this local turn.
+                        let generation = match pending.as_ref() {
+                            Some(PendingCall::ThreadStart { turn, .. }) => turn.generation,
+                            Some(PendingCall::TurnStart { generation, .. }) => *generation,
+                            _ => 0,
+                        };
+                        if self.turn_generations.get(local_thread_id) == Some(&generation) {
+                            self.finish_local_turn(local_thread_id);
+                        }
                     }
                     Some(PendingCall::SummaryThreadStart(job)) => {
                         self.summary_pending.remove(&job.key);
@@ -810,6 +962,14 @@ impl Controller {
                     }
                     _ => {}
                 }
+                if matches!(&pending, Some(PendingCall::RateLimits)) {
+                    self.state.usage_loading = false;
+                    self.state.usage_error = Some(text.clone());
+                }
+                if matches!(&pending, Some(PendingCall::Initialize)) {
+                    self.state.connected = false;
+                    self.state.connection_text = "Connection failed — Reconnect to retry".into();
+                }
                 if matches!(&pending, Some(PendingCall::ConsumeReset)) {
                     self.state.reset_in_progress = false;
                 }
@@ -836,7 +996,13 @@ impl Controller {
         match pending {
             PendingCall::Initialize => {
                 self.state.connected = true;
-                self.state.connection_text = "Codex connected".into();
+                self.state.connection_text = format!(
+                    "Connected: {}",
+                    result
+                        .get("userAgent")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Codex")
+                );
                 self.state.activity_log.push(format!(
                     "Connected to {}",
                     result
@@ -895,6 +1061,13 @@ impl Controller {
                 local_thread_id,
                 turn,
             } => {
+                if self.turn_generations.get(&local_thread_id) != Some(&turn.generation) {
+                    return;
+                }
+                if self.cancelled.contains(&local_thread_id) {
+                    self.finish_local_turn(&local_thread_id);
+                    return;
+                }
                 if let Some(thread_id) = result
                     .pointer("/thread/id")
                     .and_then(Value::as_str)
@@ -911,17 +1084,50 @@ impl Controller {
                         .error("Codex started a thread without returning its id");
                 }
             }
-            PendingCall::TurnStart { local_thread_id } => {
+            PendingCall::TurnStart {
+                local_thread_id,
+                generation,
+            } => {
+                if self.turn_generations.get(&local_thread_id) != Some(&generation) {
+                    return;
+                }
                 let turn_id = result
                     .pointer("/turn/id")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
-                self.state.running_turns.insert(local_thread_id, turn_id);
+                if let Some(turn_id) = turn_id {
+                    if !self
+                        .completed_turns
+                        .contains(&(local_thread_id.clone(), turn_id.clone()))
+                    {
+                        self.state
+                            .running_turns
+                            .insert(local_thread_id.clone(), Some(turn_id));
+                        if self.cancelled.contains(&local_thread_id) {
+                            self.interrupt_when_ready(&local_thread_id);
+                        }
+                    }
+                } else {
+                    self.finish_local_turn(&local_thread_id);
+                    self.state.error("Codex did not return a turn ID");
+                }
             }
-            PendingCall::Interrupt { local_thread_id } => {
-                self.state
-                    .finish_turn(&local_thread_id, unix_timestamp_millis() as u64);
-                self.state.activity_log.push("Turn interrupted".into());
+            PendingCall::Interrupt {
+                local_thread_id,
+                turn_id,
+            } => {
+                if self
+                    .state
+                    .running_turns
+                    .get(&local_thread_id)
+                    .and_then(|id| id.as_deref())
+                    == Some(&turn_id)
+                {
+                    self.completed_turns
+                        .insert((local_thread_id.clone(), turn_id));
+                    self.finish_local_turn(&local_thread_id);
+                    self.state.activity_log.push("Turn interrupted".into());
+                }
             }
             PendingCall::SummaryThreadStart(job) => {
                 if let Some(thread_id) = result
@@ -969,7 +1175,7 @@ impl Controller {
     }
 
     fn start_turn(&mut self, local_thread_id: String, thread_id: String, turn: PendingTurn) {
-        self.request("turn/start", json!({"threadId":thread_id,"input":turn.input,"cwd":turn.cwd,"approvalPolicy":turn.approval_policy,"sandbox":turn.sandbox,"model":turn.model,"effort":turn.effort}), PendingCall::TurnStart { local_thread_id });
+        self.request("turn/start", json!({"threadId":thread_id,"input":turn.input,"cwd":turn.cwd,"approvalPolicy":turn.approval_policy,"sandbox":turn.sandbox,"model":turn.model,"effort":turn.effort}), PendingCall::TurnStart { local_thread_id, generation: turn.generation });
     }
 
     fn start_title_summary(&mut self, local_thread_id: &str, request: &str) {
@@ -1163,20 +1369,7 @@ impl Controller {
         }
         match method {
             "backend/exited" | "backend/protocolError" => {
-                self.startup_in_progress = false;
-                self.state.connected = false;
-                self.state.connection_text = "Codex disconnected".into();
-                self.state.running_turns.clear();
-                if self
-                    .active_summaries
-                    .values()
-                    .any(|summary| matches!(summary.target, SummaryTarget::GitCommit { .. }))
-                {
-                    self.state.git_action_in_progress = false;
-                }
-                self.summary_pending.clear();
-                self.active_summaries.clear();
-                self.state.error(
+                self.disconnect(
                     params
                         .get("message")
                         .and_then(Value::as_str)
@@ -1215,15 +1408,38 @@ impl Controller {
                         .pointer("/turn/id")
                         .and_then(Value::as_str)
                         .map(str::to_owned);
-                    self.state.running_turns.insert(local_id, turn_id);
+                    if !self.state.running_turns.contains_key(&local_id)
+                        || turn_id.as_ref().is_some_and(|id| {
+                            self.completed_turns
+                                .contains(&(local_id.clone(), id.clone()))
+                        })
+                    {
+                        return;
+                    }
+                    self.state.running_turns.insert(local_id.clone(), turn_id);
+                    if self.cancelled.contains(&local_id) {
+                        self.interrupt_when_ready(&local_id);
+                    }
                     self.state.activity_log.push("Agent turn started".into());
                     self.state.touch();
                 }
             }
             "turn/completed" => {
                 if let Some(local_id) = self.local_thread_id(&params) {
-                    self.state
-                        .finish_turn(&local_id, unix_timestamp_millis() as u64);
+                    if let Some(turn_id) = params.pointer("/turn/id").and_then(Value::as_str) {
+                        self.completed_turns
+                            .insert((local_id.clone(), turn_id.to_owned()));
+                        if self
+                            .state
+                            .running_turns
+                            .get(&local_id)
+                            .and_then(|id| id.as_deref())
+                            .is_some_and(|id| id != turn_id)
+                        {
+                            return;
+                        }
+                    }
+                    self.finish_local_turn(&local_id);
                 }
                 let status = params
                     .pointer("/turn/status")
@@ -1495,7 +1711,15 @@ impl Controller {
                     .and_then(Value::as_str)
                     .unwrap_or("Tool")
                     .into(),
-                item.get("arguments").map(value_to_text).unwrap_or_default(),
+                ["arguments", "result", "error"]
+                    .into_iter()
+                    .filter_map(|field| {
+                        item.get(field)
+                            .filter(|value| !value.is_null())
+                            .map(|value| format!("{field}: {}", value_to_text(value)))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
             ),
             "webSearch" => (ItemKind::Tool, "Web search".into(), value_to_text(item)),
             other => (
@@ -1503,6 +1727,27 @@ impl Controller {
                 ferro_code_core::humanize(other),
                 value_to_text(item),
             ),
+        };
+        let item_status = if completed {
+            match item.get("status").and_then(Value::as_str) {
+                Some("failed" | "declined" | "interrupted") => item["status"].as_str().unwrap(),
+                _ if item
+                    .get("exitCode")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|code| code != 0)
+                    || item.get("error").is_some_and(|error| !error.is_null()) =>
+                {
+                    "failed"
+                }
+                _ => "completed",
+            }
+        } else {
+            "running"
+        };
+        let body = if let Some(code) = item.get("exitCode").and_then(Value::as_i64) {
+            format!("{body}\nExit code: {code}")
+        } else {
+            body
         };
         let Some(messages) = self.messages_for_thread_mut(local_id) else {
             return;
@@ -1514,7 +1759,7 @@ impl Controller {
                 .find(|entry| entry.id.starts_with("local-user-"))
         {
             local.id = id;
-            local.status = status(completed).into();
+            local.status = item_status.into();
             return;
         }
         if let Some(existing) = messages.iter_mut().find(|entry| entry.id == id) {
@@ -1523,7 +1768,7 @@ impl Controller {
             if !body.is_empty() && kind != ItemKind::User {
                 existing.body = body;
             }
-            existing.status = status(completed).into();
+            existing.status = item_status.into();
             if completed
                 && matches!(
                     kind,
@@ -1535,7 +1780,7 @@ impl Controller {
         } else {
             let mut entry = ConversationItem::new(id, kind, title);
             entry.body = body;
-            entry.status = status(completed).into();
+            entry.status = item_status.into();
             entry.collapsed = completed
                 && matches!(
                     kind,
@@ -1553,17 +1798,39 @@ impl Controller {
             .to_owned();
         let request_id = message.get("id").cloned().unwrap_or(Value::Null);
         let params = message.get("params").cloned().unwrap_or(Value::Null);
+        let local_thread_id = self.local_thread_id(&params);
+        let origin = local_thread_id
+            .as_ref()
+            .and_then(|id| self.state.threads.iter().find(|t| &t.id == id))
+            .map(|thread| {
+                let project = self
+                    .state
+                    .projects
+                    .iter()
+                    .find(|p| p.id == thread.project_id);
+                format!(
+                    "{} — {}\n{}",
+                    project
+                        .map(|p| p.name.as_str())
+                        .unwrap_or("Unknown project"),
+                    thread.title,
+                    project
+                        .map(|p| p.path.as_str())
+                        .unwrap_or("Unknown workspace")
+                )
+            })
+            .unwrap_or_else(|| "Unknown requesting workspace".into());
         match method.as_str() {
             "item/commandExecution/requestApproval" | "execCommandApproval" => {
                 let command = params.get("command").map(value_to_text).unwrap_or_else(|| "Command requested".into());
                 let cwd = params.get("cwd").and_then(Value::as_str).unwrap_or_default();
                 let reason = params.get("reason").and_then(Value::as_str).unwrap_or("Codex needs permission to run this command.");
-                self.state.enqueue_approval(Approval { request_id, method, title: "Run command?".into(), detail: format!("{command}\n\nWorking directory: {cwd}\n{reason}"), allow_session: true });
+                self.state.enqueue_approval(Approval { local_thread_id, request_id, method, title: "Run command?".into(), detail: format!("{origin}\n\n{command}\n\nWorking directory: {cwd}\n{reason}"), allow_session: true });
             }
             "item/fileChange/requestApproval" | "applyPatchApproval" => {
                 let reason = params.get("reason").and_then(Value::as_str).unwrap_or("Codex wants to edit files in this workspace.");
-                let root = params.get("grantRoot").and_then(Value::as_str).unwrap_or(&self.state.prefs.workspace);
-                self.state.enqueue_approval(Approval { request_id, method, title: "Apply file changes?".into(), detail: format!("{reason}\n\nTarget: {root}"), allow_session: true });
+                let root = params.get("grantRoot").and_then(Value::as_str).unwrap_or("See requesting workspace above");
+                self.state.enqueue_approval(Approval { local_thread_id, request_id, method, title: "Apply file changes?".into(), detail: format!("{origin}\n\n{reason}\n\nTarget: {root}"), allow_session: true });
             }
             "item/tool/requestUserInput" => {
                 let local_thread_id = self.local_thread_id(&params);
@@ -1577,10 +1844,6 @@ impl Controller {
             _ => self.send_raw(json!({"id":request_id,"error":{"code":-32601,"message":format!("Unsupported request: {method}")}})),
         }
     }
-}
-
-fn status(completed: bool) -> &'static str {
-    if completed { "completed" } else { "running" }
 }
 
 fn attachment_input(path: String) -> Value {
@@ -1978,5 +2241,79 @@ mod tests {
             ["/tmp/screenshot.png"]
         );
         assert_eq!(controller.state.conversation[0].body, "Describe this");
+    }
+}
+
+#[cfg(test)]
+mod audit_controller {
+    use super::*;
+    #[test]
+    fn string_request_ids_queue_approval() {
+        let mut c = Controller::new(PersistedState::default());
+        c.handle_message(json!({"id":"request-1", "method":"item/commandExecution/requestApproval", "params":{"command":"echo hi"}}));
+        assert!(c.state.approval.is_some());
+    }
+    #[test]
+    fn rate_limit_error_stops_loading() {
+        let mut c = Controller::new(PersistedState::default());
+        c.state.usage_loading = true;
+        c.pending.insert(1, PendingCall::RateLimits);
+        c.handle_message(json!({"id":1,"error":{"message":"test failure"}}));
+        assert!(!c.state.usage_loading);
+    }
+    #[test]
+    fn late_start_response_does_not_resurrect_completed_turn() {
+        let mut c = Controller::new(PersistedState::default());
+        c.state.add_project("project".into(), 1);
+        let id = c.state.new_thread(2).unwrap();
+        c.state.runtime_threads.insert(id.clone(), "runtime".into());
+        c.state.begin_turn(id.clone(), 100);
+        c.handle_notification(
+            "turn/completed",
+            json!({"threadId":"runtime","turn":{"id":"turn", "status":"completed"}}),
+        );
+        c.handle_response(
+            PendingCall::TurnStart {
+                local_thread_id: id,
+                generation: 1,
+            },
+            json!({"turn":{"id":"turn"}}),
+        );
+        assert!(!c.state.active_thread_busy());
+    }
+    #[test]
+    fn failed_commands_keep_failed_status() {
+        let mut c = Controller::new(PersistedState::default());
+        c.state.add_project("project".into(), 1);
+        let id = c.state.new_thread(2).unwrap();
+        c.ingest_item(&id, &json!({"id":"cmd", "type":"commandExecution", "command":"false", "status":"failed", "exitCode":1, "aggregatedOutput":""}), true);
+        assert_eq!(c.state.conversation[0].status, "failed");
+    }
+    #[test]
+    fn question_edits_are_detected_by_poll() {
+        let mut c = Controller::new(PersistedState::default());
+        c.handle_server_request(json!({"id":1,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q","question":"Pick one"}]}}));
+        c.set_question_answer(0, "option".into());
+        assert!(
+            c.poll(),
+            "UI timer relies on poll returning true to refresh question rows"
+        );
+    }
+}
+#[cfg(test)]
+mod audit_approval_target {
+    use super::*;
+    #[test]
+    fn background_file_approval_identifies_origin_project() {
+        let mut c = Controller::new(PersistedState::default());
+        c.state.add_project("project-a".into(), 1);
+        let id = c.state.new_thread(2).unwrap();
+        c.state.runtime_threads.insert(id, "runtime-a".into());
+        c.state.add_project("project-b".into(), 3);
+        c.handle_server_request(json!({"id":1,"method":"item/fileChange/requestApproval","params":{"threadId":"runtime-a"}}));
+        assert!(
+            c.state.approval.unwrap().detail.contains("project-a"),
+            "Approval shows the foreground project instead of the requesting project"
+        );
     }
 }
