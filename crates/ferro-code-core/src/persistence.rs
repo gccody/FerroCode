@@ -138,6 +138,21 @@ impl LocalStore {
     }
 
     pub fn export(&self, state: &PersistedState, target: &Path) -> Result<(), StoreError> {
+        if let (Ok(target), Ok(primary)) = (target.canonicalize(), self.path.canonicalize()) {
+            if target == primary
+                || target
+                    == self
+                        .path
+                        .with_extension("json.bak")
+                        .canonicalize()
+                        .unwrap_or_default()
+            {
+                return Err(io::Error::other(
+                    "Choose an export path outside the active history files",
+                )
+                .into());
+            }
+        }
         // Export is portable: all referenced files accompany the JSON snapshot.
         let export_store = LocalStore::new(
             target
@@ -480,6 +495,74 @@ mod recovery_tests {
         let export = dir.path().join("export.json");
         store.export(&PersistedState::default(), &export).unwrap();
         assert!(store.import(&export).is_ok());
+    }
+    #[test]
+    fn portable_export_restores_attachments_after_moving_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("original.txt");
+        fs::write(&source, "durable").unwrap();
+        let store = LocalStore::new(dir.path().join("app/state.json"));
+        let mut state = PersistedState::default();
+        state.history.drafts.insert(
+            "draft".into(),
+            crate::Draft {
+                text: "remember".into(),
+                attachments: vec![source.to_string_lossy().into_owned()],
+            },
+        );
+        let export_dir = dir.path().join("export");
+        fs::create_dir(&export_dir).unwrap();
+        store
+            .export(&state, &export_dir.join("backup.json"))
+            .unwrap();
+        let moved = dir.path().join("moved");
+        fs::rename(&export_dir, &moved).unwrap();
+        fs::remove_file(source).unwrap();
+        let restored = store.import(&moved.join("backup.json")).unwrap();
+        assert_eq!(restored.history.drafts["draft"].text, "remember");
+        assert_eq!(
+            fs::read_to_string(&restored.history.drafts["draft"].attachments[0]).unwrap(),
+            "durable"
+        );
+    }
+    #[test]
+    fn future_schema_is_preserved_even_when_backup_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(dir.path().join("state.json"));
+        store.save(&PersistedState::default()).unwrap();
+        store.save(&PersistedState::default()).unwrap();
+        let future = br#"{"schema_version":99,"state":{}}"#;
+        fs::write(store.path(), future).unwrap();
+        assert!(matches!(
+            store.open_session().unwrap().load(),
+            Err(StoreError::UnsupportedSchema)
+        ));
+        assert_eq!(fs::read(store.path()).unwrap(), future);
+    }
+    #[test]
+    fn missing_primary_recovers_previous_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(dir.path().join("state.json"));
+        let mut state = PersistedState::default();
+        state.preferences.model = "saved".into();
+        store.save(&state).unwrap();
+        store.save(&state).unwrap();
+        fs::remove_file(store.path()).unwrap();
+        let (recovered, warning) = store.open_session().unwrap().load().unwrap();
+        assert_eq!(recovered.preferences.model, "saved");
+        assert!(warning.is_some());
+    }
+    #[test]
+    fn export_cannot_overwrite_open_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(dir.path().join("state.json"));
+        store.save(&PersistedState::default()).unwrap();
+        assert!(
+            store
+                .export(&PersistedState::default(), store.path())
+                .is_err()
+        );
+        assert!(decode_snapshot(b"{}").is_err());
     }
     #[test]
     fn failed_atomic_replace_keeps_destination() {

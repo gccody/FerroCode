@@ -19,7 +19,10 @@ use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
 };
 
@@ -75,11 +78,26 @@ pub fn turn_params(mut params: Value) -> Result<Value, String> {
     serde_json::to_value(typed).map_err(|e| e.to_string())
 }
 
+/// UI-independent transport boundary; tests can replay events without model calls.
+pub trait Transport {
+    fn send(&self, message: Value) -> Result<(), String>;
+    fn try_recv(&self) -> Option<Value>;
+}
+impl Transport for CodexBackend {
+    fn send(&self, message: Value) -> Result<(), String> {
+        CodexBackend::send(self, message)
+    }
+    fn try_recv(&self) -> Option<Value> {
+        CodexBackend::try_recv(self)
+    }
+}
+
 pub struct CodexBackend {
     outgoing: Sender<Value>,
     incoming: Receiver<Value>,
     child: Arc<Mutex<Option<Child>>>,
     uses_cli_fallback: bool,
+    disconnected_reported: AtomicBool,
 }
 
 impl CodexBackend {
@@ -103,7 +121,11 @@ impl CodexBackend {
             .thread_stack_size(16 * 1024 * 1024)
             .build()
             .map_err(|error| format!("Could not start the Codex SDK runtime: {error}"))?;
-        let client = runtime.block_on(start_sdk_client())?;
+        let client = runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(30), start_sdk_client())
+                .await
+                .map_err(|_| "Codex SDK startup timed out".to_owned())?
+        })?;
         let (out_tx, out_rx) = unbounded::<Value>();
         let (in_tx, in_rx) = unbounded::<Value>();
 
@@ -118,6 +140,7 @@ impl CodexBackend {
             incoming: in_rx,
             child: Arc::new(Mutex::new(None)),
             uses_cli_fallback: false,
+            disconnected_reported: AtomicBool::new(false),
         })
     }
 
@@ -138,6 +161,13 @@ impl CodexBackend {
         let (out_tx, out_rx) = unbounded::<Value>();
         let (in_tx, in_rx) = unbounded::<Value>();
 
+        let backend = Self {
+            outgoing: out_tx,
+            incoming: in_rx,
+            child,
+            uses_cli_fallback: true,
+            disconnected_reported: AtomicBool::new(false),
+        };
         spawn_writer(stdin, out_rx, in_tx.clone())?;
         let reader_tx = in_tx.clone();
         thread::Builder::new().name("codex-app-server-reader".into()).spawn(move || {
@@ -167,12 +197,7 @@ impl CodexBackend {
             })
             .map_err(|error| error.to_string())?;
 
-        Ok(Self {
-            outgoing: out_tx,
-            incoming: in_rx,
-            child,
-            uses_cli_fallback: true,
-        })
+        Ok(backend)
     }
 
     pub fn uses_cli_fallback(&self) -> bool {
@@ -189,9 +214,9 @@ impl CodexBackend {
         match self.incoming.try_recv() {
             Ok(message) => Some(message),
             Err(crossbeam_channel::TryRecvError::Empty) => None,
-            Err(crossbeam_channel::TryRecvError::Disconnected) => Some(
-                json!({"method":"backend/exited","params":{"message":"Codex transport disconnected"}}),
-            ),
+            Err(crossbeam_channel::TryRecvError::Disconnected) =>
+                (!self.disconnected_reported.swap(true, Ordering::Relaxed)).then(||
+                    json!({"method":"backend/exited","params":{"message":"Codex transport disconnected"}})),
         }
     }
 }
@@ -301,7 +326,7 @@ async fn handle_sdk_message(
     if method == Some("initialize") {
         let id = message.get("id").cloned().unwrap_or(Value::Null);
         return incoming
-            .send(json!({"id":id,"result":{"userAgent":"Codex Rust SDK","codexHome":"","platformFamily":std::env::consts::FAMILY,"platformOs":std::env::consts::OS}}))
+            .send(json!({"id":id,"result":{"userAgent":"Codex Rust SDK (6478a751)","codexHome":"","platformFamily":std::env::consts::FAMILY,"platformOs":std::env::consts::OS}}))
             .map_err(|_| "Codex SDK receiver is closed".to_owned());
     }
     if method == Some("initialized") {
@@ -482,7 +507,9 @@ mod regression_tests {
             incoming: rx,
             child: Arc::new(Mutex::new(None)),
             uses_cli_fallback: false,
+            disconnected_reported: AtomicBool::new(false),
         };
         assert_eq!(backend.try_recv().unwrap()["method"], "backend/exited");
+        assert!(backend.try_recv().is_none());
     }
 }
