@@ -661,3 +661,11 @@ mod tests {
         );
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitChange {
+    pub index: char,
+    pub worktree: char,
+    pub path: String,
+    pub original_path: Option<String>,
+}

@@ -5589,6 +5589,7 @@ dependencies = [
  "ferro-code-core",
  "image",
  "rfd",
+ "serde_json",
  "slint",
  "slint-build",
  "tempfile",

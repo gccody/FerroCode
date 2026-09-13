@@ -1,18 +1,12 @@
-use crate::{
-    MainWindow, OpenMethod, PendingAttachment, clipboard_file_paths, pending_attachment,
-    sync_attachment_ui, sync_ui,
-};
+use crate::{MainWindow, OpenMethod, sync_ui};
 use ferro_code_app::Controller;
 use ferro_code_core::{ApprovalChoice, SandboxChoice};
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{ComponentHandle, SharedString, Timer};
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 
 #[cfg(windows)]
-use std::time::Duration;
+use std::{cell::Cell, time::Duration};
 
 #[cfg(windows)]
 use std::{
@@ -384,8 +378,6 @@ pub(super) fn wire_callbacks(
     ui: &MainWindow,
     controller: &Rc<RefCell<Controller>>,
     search: &Rc<RefCell<String>>,
-    attachments: &Rc<RefCell<Vec<PendingAttachment>>>,
-    attachment_temp_dir: &Rc<Option<tempfile::TempDir>>,
     open_methods: &Rc<Vec<OpenMethod>>,
 ) {
     let weak = ui.as_weak();
@@ -548,19 +540,27 @@ pub(super) fn wire_callbacks(
     let weak = ui.as_weak();
     let controller_ref = controller.clone();
     let search_ref = search.clone();
-    let attachment_ref = attachments.clone();
     ui.on_send_message(move |text| {
-        let files = std::mem::take(&mut *attachment_ref.borrow_mut())
-            .into_iter()
-            .map(|attachment| attachment.path.to_string_lossy().into_owned())
-            .collect();
-        controller_ref
-            .borrow_mut()
-            .send_prompt(text.to_string(), files);
+        let mut controller = controller_ref.borrow_mut();
+        let draft = controller.state.active_draft();
+        let key = controller.state.draft_key();
+        let accepted = controller.send_prompt(text.to_string(), draft.attachments);
+        if accepted {
+            controller.state.drafts.remove(&key);
+            controller.state.touch();
+        }
+        drop(controller);
         if let Some(ui) = weak.upgrade() {
-            sync_attachment_ui(&ui, &attachment_ref.borrow());
             sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
         }
+        accepted
+    });
+    let controller_ref = controller.clone();
+    ui.on_edit_draft(move |text| {
+        let mut controller = controller_ref.borrow_mut();
+        let mut draft = controller.state.active_draft();
+        draft.text = text.to_string();
+        controller.state.set_draft(draft);
     });
 
     let weak = ui.as_weak();
@@ -571,86 +571,6 @@ pub(super) fn wire_callbacks(
         if let Some(ui) = weak.upgrade() {
             sync_ui(&ui, &controller_ref.borrow(), &search_ref.borrow());
         }
-    });
-
-    let weak = ui.as_weak();
-    let attachment_ref = attachments.clone();
-    ui.on_attach_files(move || {
-        let files = rfd::FileDialog::new()
-            .set_title("Attach files")
-            .pick_files()
-            .unwrap_or_default();
-        attachment_ref
-            .borrow_mut()
-            .extend(files.into_iter().map(pending_attachment));
-        if let Some(ui) = weak.upgrade() {
-            sync_attachment_ui(&ui, &attachment_ref.borrow());
-        }
-    });
-
-    let weak = ui.as_weak();
-    let attachment_ref = attachments.clone();
-    ui.on_remove_attachment(move |index| {
-        let Ok(index) = usize::try_from(index) else {
-            return;
-        };
-        let mut attachments = attachment_ref.borrow_mut();
-        if index < attachments.len() {
-            attachments.remove(index);
-        }
-        if let Some(ui) = weak.upgrade() {
-            sync_attachment_ui(&ui, &attachments);
-        }
-    });
-
-    let weak = ui.as_weak();
-    let attachment_ref = attachments.clone();
-    let temp_dir_ref = attachment_temp_dir.clone();
-    let paste_sequence = Rc::new(Cell::new(0_u64));
-    ui.on_paste_image(move || {
-        let clipboard_files = clipboard_file_paths();
-        if !clipboard_files.is_empty() {
-            attachment_ref
-                .borrow_mut()
-                .extend(clipboard_files.into_iter().map(pending_attachment));
-            if let Some(ui) = weak.upgrade() {
-                sync_attachment_ui(&ui, &attachment_ref.borrow());
-            }
-            return true;
-        }
-        let Some(temp_dir) = temp_dir_ref.as_ref() else {
-            return false;
-        };
-        let Some((width, height, bytes)) = arboard::Clipboard::new()
-            .ok()
-            .and_then(|mut clipboard| clipboard.get_image().ok())
-            .map(|image| (image.width, image.height, image.bytes.into_owned()))
-        else {
-            return false;
-        };
-        let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
-            return false;
-        };
-        let sequence = paste_sequence.get().saturating_add(1);
-        paste_sequence.set(sequence);
-        let path = temp_dir.path().join(format!("pasted-image-{sequence}.png"));
-        if image::save_buffer_with_format(
-            &path,
-            &bytes,
-            width,
-            height,
-            image::ColorType::Rgba8,
-            image::ImageFormat::Png,
-        )
-        .is_err()
-        {
-            return false;
-        }
-        attachment_ref.borrow_mut().push(pending_attachment(path));
-        if let Some(ui) = weak.upgrade() {
-            sync_attachment_ui(&ui, &attachment_ref.borrow());
-        }
-        true
     });
 
     let weak = ui.as_weak();

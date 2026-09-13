@@ -27,6 +27,17 @@ export component SettingsOverlay inherits Rectangle {
     in property <int> reset-count: 0;
     in property <bool> reset-in-progress: false;
 
+    in property <string> connection-text;
+    in property <string> storage-status;
+    in property <bool> archive-available;
+    in property <bool> usage-loading;
+    in property <string> usage-error;
+    callback reconnect;
+    callback retry-prompt;
+    callback undo-archive;
+    callback export-history;
+    callback restore-history;
+    callback export-diagnostics;
     callback close;
     callback select-default-model(string);
     callback select-default-effort(string);
@@ -69,6 +80,21 @@ export component SettingsOverlay inherits Rectangle {
                     // right edge of the viewport, so keep controls out of its gutter.
                     padding-right: 14px;
                     spacing: 13px;
+                    SectionTitle { text: "HISTORY AND CONNECTION"; color: #a995ff; }
+                    Text { text: root.connection-text; color: #c9cad0; wrap: word-wrap; }
+                    HorizontalLayout {
+                        SmallButton { text: "Reconnect"; clicked => { root.reconnect(); } }
+                        SmallButton { text: "Restore last prompt"; clicked => { root.retry-prompt(); } }
+                    }
+                    HorizontalLayout {
+                        SmallButton { text: "Export backup"; clicked => { root.export-history(); } }
+                        SmallButton { text: "Restore backup"; clicked => { root.restore-history(); } }
+                    }
+                    SmallButton { text: "Restore most recently archived thread"; enabled: root.archive-available; clicked => { root.undo-archive(); } }
+                    SmallButton { text: "Export diagnostics"; clicked => { root.export-diagnostics(); } }
+                    if root.storage-status != "": Text { text: root.storage-status; color: #eea086; wrap: word-wrap; }
+                    if root.usage-loading: Text { text: "Refreshing usage…"; color: #c9cad0; }
+                    if root.usage-error != "": Text { text: root.usage-error; color: #eea086; wrap: word-wrap; }
                     SectionTitle { text: "AGENT DEFAULTS"; color: #a995ff; }
                     Text { text: "Model"; color: #c9cad0; font-size: 11px; }
                     ComboBox { model: root.model-names; current-index <=> root.default-model-index; selected(value) => { root.select-default-model(value); } }

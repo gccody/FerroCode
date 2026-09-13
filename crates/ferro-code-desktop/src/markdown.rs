@@ -1,6 +1,9 @@
 use crate::{MarkdownBlock, MarkdownTableCell, MarkdownTableRow, model};
 use ferro_code_core::{ConversationItem, ItemKind};
 use slint::StyledText;
+use std::cell::RefCell;
+type CachedMarkdown = (String, String, bool, Vec<MarkdownBlock>);
+thread_local! { static MARKDOWN_CACHE: RefCell<Vec<CachedMarkdown>> = const { RefCell::new(Vec::new()) }; }
 
 pub(super) fn wrapped_line_count(text: &str, max_chars: usize) -> usize {
     text.lines()
@@ -14,7 +17,30 @@ pub(super) fn markdown_blocks(item: &ConversationItem) -> Vec<MarkdownBlock> {
         return Vec::new();
     }
 
-    parse_markdown_blocks(&item.body, item.kind == ItemKind::Reasoning)
+    let reasoning = item.kind == ItemKind::Reasoning;
+    MARKDOWN_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((_, _, _, blocks)) = cache
+            .iter()
+            .find(|(id, body, kind, _)| id == &item.id && body == &item.body && *kind == reasoning)
+        {
+            return blocks.clone();
+        }
+        let blocks = parse_markdown_blocks(&item.body, reasoning);
+        cache.retain(|(id, _, _, _)| id != &item.id);
+        if item.body.len() <= 64_000 {
+            if cache.len() >= 128 {
+                cache.remove(0);
+            }
+            cache.push((
+                item.id.clone(),
+                item.body.clone(),
+                reasoning,
+                blocks.clone(),
+            ));
+        }
+        blocks
+    })
 }
 
 pub(super) fn parse_markdown_blocks(markdown: &str, reasoning: bool) -> Vec<MarkdownBlock> {

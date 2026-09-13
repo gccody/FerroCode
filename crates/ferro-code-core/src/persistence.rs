@@ -9,6 +9,7 @@ use std::{
 pub enum StoreError {
     Io(io::Error),
     Json(serde_json::Error),
+    UnsupportedSchema,
 }
 
 impl fmt::Display for StoreError {
@@ -16,6 +17,10 @@ impl fmt::Display for StoreError {
         match self {
             Self::Io(error) => write!(f, "{error}"),
             Self::Json(error) => write!(f, "{error}"),
+            Self::UnsupportedSchema => write!(
+                f,
+                "History was saved by an unsupported version. Open it with a compatible Ferro Code version."
+            ),
         }
     }
 }
@@ -119,7 +124,9 @@ impl LocalStore {
             .file_name()
             .ok_or_else(|| io::Error::other("Attachment has no filename"))?
             .to_string_lossy();
-        let target = directory.join(format!("{}-{filename}", crate::new_id("file")));
+        let directory = directory.join(crate::new_id("file"));
+        fs::create_dir(&directory)?;
+        let target = directory.join(filename.as_ref());
         let mut input = fs::File::open(source)?;
         let mut output = fs::OpenOptions::new()
             .write(true)
@@ -144,9 +151,12 @@ impl LocalStore {
         );
         let mut state = state.clone();
         remap_attachments(&mut state, |path| {
-            export_store
-                .import_attachment(Path::new(path))
-                .map(|p| p.to_string_lossy().into_owned())
+            export_store.import_attachment(Path::new(path)).map(|p| {
+                p.strip_prefix(target.parent().unwrap_or(Path::new(".")))
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .into_owned()
+            })
         })?;
         atomic_write(target, &encode_snapshot(&state)?)
     }
@@ -154,7 +164,13 @@ impl LocalStore {
     pub fn import(&self, source: &Path) -> Result<PersistedState, StoreError> {
         let mut state = decode_snapshot(&fs::read(source)?)?;
         remap_attachments(&mut state, |path| {
-            self.import_attachment(Path::new(path))
+            let path = Path::new(path);
+            let source_path = if path.is_absolute() {
+                path.to_owned()
+            } else {
+                source.parent().unwrap_or(Path::new(".")).join(path)
+            };
+            self.import_attachment(&source_path)
                 .map(|p| p.to_string_lossy().into_owned())
         })?;
         Ok(state)
@@ -169,28 +185,34 @@ pub struct StoreSession {
 }
 impl StoreSession {
     pub fn load(&self) -> Result<(PersistedState, Option<String>), StoreError> {
-        match self.store.load() {
-            Ok(state)
-                if self.store.path.exists()
-                    || !self.store.path.with_extension("json.bak").exists() =>
-            {
-                Ok((state, None))
+        let primary = self.store.load();
+        if matches!(&primary, Err(StoreError::UnsupportedSchema)) {
+            return primary.map(|state| (state, None));
+        }
+        if primary.is_ok() && self.store.path.exists() {
+            return primary.map(|state| (state, None));
+        }
+        for candidate in [
+            self.store.path.with_extension("json.bak"),
+            self.store.path.with_extension("json.tmp"),
+        ] {
+            if !candidate.exists() {
+                continue;
             }
-            result => {
-                let backup = self.store.path.with_extension("json.bak");
-                let restored = fs::read(&backup)
-                    .map_err(StoreError::from)
-                    .and_then(|bytes| decode_snapshot(&bytes));
-                match restored {
-                    Ok(state) => {
-                        self.preserve_current()?;
-                        atomic_write(&self.store.path, &encode_snapshot(&state)?)?;
-                        Ok((state, Some("Recovered local history from the previous saved generation. The damaged file was preserved.".into())))
-                    }
-                    Err(_) => result.map(|state| (state, None)),
+            match fs::read(&candidate)
+                .map_err(StoreError::from)
+                .and_then(|bytes| decode_snapshot(&bytes))
+            {
+                Ok(state) => {
+                    self.preserve_current()?;
+                    atomic_write(&self.store.path, &encode_snapshot(&state)?)?;
+                    return Ok((state, Some("Recovered local history from a saved generation. The damaged file was preserved.".into())));
                 }
+                Err(error) if primary.is_ok() => return Err(error),
+                Err(_) => {}
             }
         }
+        primary.map(|state| (state, None))
     }
     fn preserve_current(&self) -> Result<(), StoreError> {
         if self.store.path.exists() {
@@ -225,10 +247,7 @@ fn decode_snapshot(bytes: &[u8]) -> Result<PersistedState, StoreError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     let state = if let Some(version) = value.get("schema_version") {
         if version.as_u64() != Some(1) {
-            return Err(io::Error::other(
-                "Unsupported history schema; use a compatible Ferro Code version",
-            )
-            .into());
+            return Err(StoreError::UnsupportedSchema);
         }
         value
             .get("state")

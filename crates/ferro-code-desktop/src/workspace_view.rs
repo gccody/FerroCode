@@ -9,21 +9,37 @@ pub(super) struct ParsedChangeRow {
 }
 
 pub(super) fn change_rows(status: &str) -> Vec<ParsedChangeRow> {
-    status
-        .lines()
-        .filter_map(|line| {
-            let bytes = line.as_bytes();
-            if bytes.len() < 4 {
+    let changes =
+        serde_json::from_str::<Vec<ferro_code_core::GitChange>>(status).unwrap_or_else(|_| {
+            status
+                .lines()
+                .filter_map(|line| {
+                    let bytes = line.as_bytes();
+                    if bytes.len() < 4 {
+                        return None;
+                    }
+                    let raw = line.get(3..)?.trim();
+                    let (original_path, path) = raw
+                        .rsplit_once(" -> ")
+                        .map(|(from, to)| (Some(from.to_owned()), to.to_owned()))
+                        .unwrap_or((None, raw.to_owned()));
+                    Some(ferro_code_core::GitChange {
+                        index: bytes[0] as char,
+                        worktree: bytes[1] as char,
+                        path,
+                        original_path,
+                    })
+                })
+                .collect()
+        });
+    changes
+        .into_iter()
+        .filter_map(|change| {
+            let index_status = change.index;
+            let worktree_status = change.worktree;
+            if change.path.is_empty() || (index_status == '!' && worktree_status == '!') {
                 return None;
             }
-
-            let index_status = bytes[0] as char;
-            let worktree_status = bytes[1] as char;
-            let raw_path = line[3..].trim();
-            if raw_path.is_empty() || (index_status == '!' && worktree_status == '!') {
-                return None;
-            }
-
             let conflicted = matches!(
                 (index_status, worktree_status),
                 ('D', 'D')
@@ -65,7 +81,7 @@ pub(super) fn change_rows(status: &str) -> Vec<ParsedChangeRow> {
 
             // For renames, make the destination the prominent file name while
             // retaining the complete old-to-new path in the supporting detail.
-            let display_path = raw_path.rsplit_once(" -> ").map_or(raw_path, |(_, to)| to);
+            let display_path = change.path.as_str();
             let name = display_path
                 .rsplit(['/', '\\'])
                 .next()
@@ -74,8 +90,8 @@ pub(super) fn change_rows(status: &str) -> Vec<ParsedChangeRow> {
                 .rfind(['/', '\\'])
                 .map(|separator| &display_path[..separator])
                 .unwrap_or("");
-            let detail = if raw_path.contains(" -> ") {
-                format!("{status_label} · {raw_path}")
+            let detail = if let Some(original) = change.original_path {
+                format!("{status_label} · {original} -> {display_path}")
             } else if parent.is_empty() {
                 status_label.to_owned()
             } else {

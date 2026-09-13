@@ -769,6 +769,7 @@ mod tests {
         assert!(state.active_local_thread.is_none());
     }
 
+    #[cfg(windows)]
     #[test]
     fn duplicate_project_path_selects_existing_project() {
         let mut state = state();

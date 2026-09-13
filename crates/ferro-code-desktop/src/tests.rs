@@ -369,8 +369,8 @@ fn thread_rows_include_all_projects_and_map_sidebar_state() {
         .find(|thread| thread.id == first_thread)
         .unwrap();
     first.title = "Older result".into();
-    first
-        .messages
+    state
+        .conversation
         .push(ConversationItem::new("m1", ItemKind::Assistant, "Codex"));
 
     let second_project = state.add_project(r"C:\Code\Second".into(), 2);
@@ -381,10 +381,11 @@ fn thread_rows_include_all_projects_and_map_sidebar_state() {
         .find(|thread| thread.id == second_thread)
         .unwrap();
     second.title = "Newest Match".into();
-    second.messages.extend([
+    state.conversation.extend([
         ConversationItem::new("m2", ItemKind::User, "User"),
         ConversationItem::new("m3", ItemKind::Assistant, "Codex"),
     ]);
+    state.sync_active_conversation();
     state.running_turns.insert(second_thread.clone(), None);
     state
         .threads
